@@ -8,6 +8,8 @@ import "hardhat-gas-reporter";
 import type { HardhatUserConfig } from "hardhat/config";
 import { vars } from "hardhat/config";
 import "solidity-coverage";
+import * as fs from "fs";
+import * as path from "path";
 
 import "./tasks/accounts";
 import "./tasks/FHECounter";
@@ -16,6 +18,18 @@ import "./tasks/FHECounter";
 
 const MNEMONIC: string = vars.get("MNEMONIC", "test test test test test test test test test test test junk");
 const INFURA_API_KEY: string = vars.get("INFURA_API_KEY", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz");
+
+// 读取私钥文件
+let DEPLOYER_PRIVATE_KEY = "";
+try {
+  const keyPath = path.join(__dirname, "deployer_private_key.txt");
+  if (fs.existsSync(keyPath)) {
+    DEPLOYER_PRIVATE_KEY = fs.readFileSync(keyPath, "utf8").trim();
+    console.log("✅ 已加载部署私钥");
+  }
+} catch (error) {
+  console.log("⚠️  未找到deployer_private_key.txt，将使用助记词");
+}
 
 const config: HardhatUserConfig = {
   defaultNetwork: "hardhat",
@@ -49,13 +63,17 @@ const config: HardhatUserConfig = {
       url: "http://localhost:8545",
     },
     sepolia: {
-      accounts: {
-        mnemonic: MNEMONIC,
-        path: "m/44'/60'/0'/0/",
-        count: 10,
-      },
+      accounts: DEPLOYER_PRIVATE_KEY 
+        ? [DEPLOYER_PRIVATE_KEY]
+        : {
+            mnemonic: MNEMONIC,
+            path: "m/44'/60'/0'/0/",
+            count: 10,
+          },
       chainId: 11155111,
-      url: `https://sepolia.infura.io/v3/${INFURA_API_KEY}`,
+      url: INFURA_API_KEY !== "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        ? `https://sepolia.infura.io/v3/${INFURA_API_KEY}`
+        : "https://ethereum-sepolia-rpc.publicnode.com", // 使用公共RPC
     },
   },
   paths: {
@@ -78,6 +96,7 @@ const config: HardhatUserConfig = {
         enabled: true,
         runs: 800,
       },
+      viaIR: true,
       evmVersion: "cancun",
     },
   },
