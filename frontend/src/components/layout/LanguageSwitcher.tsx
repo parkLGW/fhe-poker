@@ -6,8 +6,8 @@ export function LanguageSwitcher() {
   const [isOpen, setIsOpen] = useState(false);
 
   const languages = [
-    { code: 'zh-CN', name: '简体中文', flag: '' },
-    { code: 'en-US', name: 'English', flag: '' },
+    { code: 'zh-CN', name: '简体中文', flag: 'cn' },
+    { code: 'en-US', name: 'English', flag: 'en' },
   ];
 
   const currentLanguage = languages.find(lang => lang.code === i18n.language) || languages[0];
@@ -60,7 +60,7 @@ export function LanguageSwitcher() {
                   }
                 `}
               >
-                <span className="text-2xl">{lang.flag}</span>
+                
                 <span>{lang.name}</span>
                 {i18n.language === lang.code && (
                   <svg style={{ width: '16px', height: '16px' }} className="ml-auto text-blue-400" fill="currentColor" viewBox="0 0 20 20">

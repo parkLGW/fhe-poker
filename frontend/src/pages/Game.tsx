@@ -1,567 +1,917 @@
-import { useState, useEffect } from 'react';
+/**
+ * 游戏页面 - 重新设计版本
+ * 职责：显示游戏状态，处理用户操作
+ */
+
+import { useState, useEffect, useCallback } from 'react';
 import { useAccount } from 'wagmi';
-import { GameState } from '../lib/contract';
-import { PlayerSeat } from '../components/game/PlayerSeat';
-import { CommunityCards } from '../components/game/CommunityCards';
-import { BettingPanel } from '../components/game/BettingPanel';
+import { useTranslation } from 'react-i18next';
+import { contractService } from '../services/ContractService';
 import { useFHEVM } from '../hooks/useFHEVM';
-import { callBet, callLeaveTable, readTableInfo, readCommunityCards, readPlayerCards, readPlayerIndex, callFold, callCheck, callCall } from '../lib/ethers-contract';
+import { useGameStore } from '../store/gameStore.tsx';
+import { POKER_TABLE_ADDRESS } from '../lib/contract';
+import { LanguageSwitcher } from '../components/layout/LanguageSwitcher';
 
 interface GameProps {
   tableId: number;
   onBack: () => void;
-  onLeaveGame: () => void;
+}
+
+// 卡牌花色和点数
+const SUITS = ['♠', '♥', '♦', '♣'];
+const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+
+// 判断花色颜色
+function getSuitColor(suit: string): string {
+  return suit === '♥' || suit === '♦' ? 'text-red-600' : 'text-gray-900';
+}
+
+// 扑克牌组件 - 支持不同尺寸
+function PokerCard({ card, isHidden = false, size = 'normal' }: { card?: number | null; isHidden?: boolean; size?: 'normal' | 'large' }) {
+  // 根据尺寸设置不同的样式 - 使用内联样式确保生效
+  const sizeStyle = size === 'large'
+    ? { width: '6rem', height: '9rem' }    // 大尺寸：96px x 144px
+    : { width: '4rem', height: '6rem' };   // 普通尺寸：64px x 96px (w-16 h-24)
+
+  const textSizes = size === 'large'
+    ? { corner: 'text-sm', suit: 'text-xl', center: 'text-5xl', back: 'text-4xl' }
+    : { corner: 'text-[0.5rem]', suit: 'text-xs', center: 'text-2xl', back: 'text-2xl' };
+
+  if (isHidden || card === null || card === undefined) {
+    return (
+      <div style={sizeStyle} className="relative bg-gradient-to-br from-blue-600 to-blue-800 rounded-lg border-2 border-blue-900 shadow-lg transform hover:scale-105 transition-transform">
+        <div className="absolute inset-0 opacity-20">
+          <div className="w-full h-full bg-[repeating-linear-gradient(45deg,transparent,transparent_3px,rgba(255,255,255,0.1)_3px,rgba(255,255,255,0.1)_6px)]" />
+        </div>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className={`${textSizes.back} text-white opacity-50`}>🂠</div>
+        </div>
+      </div>
+    );
+  }
+
+  const numIndex = typeof card === 'bigint' ? Number(card) : Number(card || 0);
+  // 卡牌索引现在是 1-52，转换为 0-51
+  const cardIndex = numIndex - 1;
+  const suit = SUITS[Math.floor(cardIndex / 13)];
+  const rank = RANKS[cardIndex % 13];
+  const colorClass = getSuitColor(suit);
+
+  // 简化设计：只在中间显示点数和花色
+  return (
+    <div style={sizeStyle} className={`bg-white rounded-lg border-2 border-gray-300 shadow-lg transform hover:scale-105 transition-transform flex flex-col items-center justify-center ${colorClass}`}>
+      <div className="text-lg font-bold leading-tight">{rank}</div>
+      <div className="text-2xl leading-tight">{suit}</div>
+    </div>
+  );
 }
 
 export function Game({ tableId, onBack }: GameProps) {
-  const [pot] = useState(0);
-  const [communityCards, setCommunityCards] = useState<number[]>([]);
-  const [playerCards, setPlayerCards] = useState<{ card1: string; card2: string } | null>(null);
-  const [transactionStatus, setTransactionStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
-  const [transactionError, setTransactionError] = useState<string>('');
-  const [tableInfo, setTableInfo] = useState<any>(null);
-  const [myPlayerIndex, setMyPlayerIndex] = useState<number | null>(null);
-  const fhevm = useFHEVM();
+  const { t } = useTranslation();
   const { address } = useAccount();
+  const fhevm = useFHEVM();
+  const { state, setTableInfo, setPlayerCards, setCommunityCards, setLoading, setError } = useGameStore();
 
-  // 调试：显示接收到的 tableId
-  console.log('🎮 Game 组件接收到的 tableId:', tableId);
+  const [isLeavingGame, setIsLeavingGame] = useState(false);
+  const [actionInProgress, setActionInProgress] = useState(false);
+  const [loadAttempts, setLoadAttempts] = useState(0);
+  const [myPlayerIndex, setMyPlayerIndex] = useState<number | null>(null);
+  const [isStartingGame, setIsStartingGame] = useState(false);
+  const [decryptedCards, setDecryptedCards] = useState<{ card1: number | null; card2: number | null }>({
+    card1: null,
+    card2: null,
+  });
+  const [isDecrypting, setIsDecrypting] = useState(false);
+  const [pendingDecryption, setPendingDecryption] = useState(false);
+  const [winnerInfo, setWinnerInfo] = useState<{ winnerIndex: number; winnerAddress: string } | null>(null);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [hasRevealedCards, setHasRevealedCards] = useState(false);
+  const [previousGameState, setPreviousGameState] = useState<number | null>(null);
+  const [playersInfo, setPlayersInfo] = useState<{
+    players: string[];
+    playerBets: bigint[];
+    playerFolded: boolean[];
+    currentPlayerIndex: number;
+    pot: bigint;
+    dealerIndex: number;
+  } | null>(null);
 
-  // 先解析游戏桌信息 (按照合约getTableInfo的返回顺序)
-  const gameState = tableInfo ? Number(tableInfo[0]) : GameState.Waiting;
-  const playerCount = tableInfo ? Number(tableInfo[1]) : 0;
-  const currentPlayerIndex = tableInfo ? Number(tableInfo[3]) : 0;
-  const dealerIndex = tableInfo ? Number(tableInfo[4]) : 0;
-  const smallBlindIndex = tableInfo ? Number(tableInfo[5]) : 0;
-  const bigBlindIndex = tableInfo ? Number(tableInfo[6]) : 0;
-
-  // 定期读取游戏桌信息
-  useEffect(() => {
-    const interval = setInterval(async () => {
+  // 加载游戏信息 - 使用 useCallback 以便在其他地方调用
+  const loadGameInfo = useCallback(async (showLoading = false) => {
       try {
-        const info = await readTableInfo(tableId);
-        setTableInfo(info);
-      } catch (error) {
-        console.error('读取游戏桌信息失败:', error);
+        // 只在首次加载或明确要求时显示 loading
+        if (showLoading) {
+          setLoading(true);
+        }
+
+        // 确保合约服务已初始化
+        await contractService.initialize();
+
+        // 获取当前玩家地址
+        const playerAddress = await contractService.getPlayerAddress();
+
+        // 检查玩家是否在游戏中
+        try {
+          const playerTableId = await contractService.getPlayerTable(playerAddress);
+          const expectedTableId = tableId + 1; // 合约中存储的是 tableId + 1
+
+          if (playerTableId === 0) {
+            // 前3次尝试时，不立即返回，可能是网络延迟
+            if (loadAttempts < 3) {
+              setLoadAttempts(loadAttempts + 1);
+            } else {
+              setError('玩家未加入游戏桌。请返回大厅重新加入。');
+              setLoading(false);
+              return;
+            }
+          } else if (playerTableId !== expectedTableId) {
+            const actualTableId = playerTableId - 1;
+            setError(`玩家在桌子 ${actualTableId} 中，不是当前桌子 ${tableId}`);
+            setLoading(false);
+            return;
+          } else {
+            setLoadAttempts(0); // 重置计数器
+          }
+        } catch (err) {
+          // 继续加载，可能是网络问题
+        }
+
+        // 加载游戏桌信息
+        const tableInfo = await contractService.getTableInfo(tableId);
+        setTableInfo(tableInfo);
+
+        // 加载游戏桌完整信息（包括玩家和奖池）
+        try {
+          const playersData = await contractService.getTableInfoWithPlayers(tableId);
+          setPlayersInfo(playersData);
+        } catch (err) {
+          console.error('❌ 无法加载玩家信息:', err);
+        }
+
+        // 获取当前玩家的座位索引
+        try {
+          const playerIndex = await contractService.getPlayerIndex(tableId, playerAddress);
+          setMyPlayerIndex(playerIndex);
+        } catch (err) {
+          console.error('❌ 无法获取玩家座位索引:', err);
+          setError('无法获取玩家座位信息，请刷新页面重试');
+        }
+
+        // 加载玩家手牌(加密的 handle)
+        try {
+          const cards = await contractService.getPlayerCards(tableId);
+          setPlayerCards(cards);
+
+          // 检查是否有新的手牌需要解密
+          // 如果手牌 handle 存在，且当前没有解密值或解密值为空，则标记需要解密
+          const hasNewCards = cards.card1 && cards.card2;
+          const needsDecryption = decryptedCards.card1 === null || decryptedCards.card2 === null;
+
+          if (hasNewCards && needsDecryption) {
+            setPendingDecryption(true);
+          }
+        } catch (err) {
+          console.error('❌ 无法读取手牌:', err);
+          // 不中断加载，继续加载其他信息
+        }
+
+        // 加载公共牌
+        const communityCards = await contractService.getCommunityCards(tableId);
+        setCommunityCards(communityCards);
+
+        // 如果游戏已结束,加载获胜者信息
+        const gameState = tableInfo ? Number(tableInfo[0]) : 0;
+        if (gameState === 6) {
+          try {
+            const winner = await contractService.getWinner(tableId);
+            setWinnerInfo(winner);
+          } catch (err) {
+            // 忽略获胜者信息加载失败
+          }
+        }
+
+        // 如果在 Showdown 阶段，检查玩家是否已经公开手牌
+        if (gameState === 5 && myPlayerIndex !== null) {
+          try {
+            const revealed = await contractService.hasPlayerRevealedCards(tableId, myPlayerIndex);
+            setHasRevealedCards(revealed);
+          } catch (err) {
+            console.warn('⚠️ 无法检查手牌公开状态:', err);
+          }
+        }
+
+        setError(null);
+      } catch (err) {
+        console.error('❌ 加载游戏信息失败:', err);
+        setError((err as Error).message);
+      } finally {
+        if (showLoading) {
+          setLoading(false);
+        }
       }
-    }, 5000); // 5秒轮询一次
+  }, [tableId, loadAttempts, decryptedCards, setLoading, setError, setTableInfo, setPlayerCards, setCommunityCards]);
 
-    // 立即读取一次
-    readTableInfo(tableId).then(setTableInfo).catch(console.error);
-
-    return () => clearInterval(interval);
-  }, [tableId]);
-
-  // 定期读取玩家索引
+  // 定时轮询游戏信息
   useEffect(() => {
-    if (!address || gameState === GameState.Waiting) return;
-
-    const interval = setInterval(async () => {
-      try {
-        const index = await readPlayerIndex(tableId, address);
-        setMyPlayerIndex(Number(index));
-      } catch (error) {
-        console.error('读取玩家索引失败:', error);
-      }
-    }, 5000); // 5秒轮询一次
-
-    // 立即读取一次
-    readPlayerIndex(tableId, address).then(idx => setMyPlayerIndex(Number(idx))).catch(console.error);
-
-    return () => clearInterval(interval);
-  }, [tableId, address, gameState]);
-
-  // 定期读取公共牌
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const cards = await readCommunityCards(tableId);
-        const validCards = [...(cards as readonly number[])].filter(c => c > 0);
-        setCommunityCards(validCards);
-      } catch (error) {
-        console.error('读取公共牌失败:', error);
-      }
-    }, 5000); // 5秒轮询一次
-
-    // 立即读取一次
-    readCommunityCards(tableId).then(cards => {
-      const validCards = [...(cards as readonly number[])].filter(c => c > 0);
-      setCommunityCards(validCards);
-    }).catch(console.error);
-
-    return () => clearInterval(interval);
-  }, [tableId]);
-
-  // 定期读取玩家手牌
-  useEffect(() => {
-    if (!address || gameState === GameState.Waiting) return;
-
-    const interval = setInterval(async () => {
-      try {
-        const cards = await readPlayerCards(tableId);
-        console.log('🃏 收到加密手牌:', cards);
-        setPlayerCards({
-          card1: cards[0] as string,
-          card2: cards[1] as string,
-        });
-      } catch (error) {
-        console.error('读取玩家手牌失败:', error);
-      }
-    }, 5000); // 5秒轮询一次
-
-    // 立即读取一次
-    readPlayerCards(tableId).then(cards => {
-      console.log('🃏 收到加密手牌:', cards);
-      setPlayerCards({
-        card1: cards[0] as string,
-        card2: cards[1] as string,
-      });
-    }).catch(console.error);
-
-    return () => clearInterval(interval);
-  }, [tableId, address, gameState]);
-
-
-  // 操作函数
-  const handleFold = async () => {
-    if (!address) {
-      alert('请连接钱包');
-      return;
+    // 首次加载显示 loading
+    if (isInitialLoad) {
+      loadGameInfo(true);
+      setIsInitialLoad(false);
+    } else {
+      loadGameInfo(false);
     }
 
+    // 轮询时不显示 loading
+    const interval = setInterval(() => loadGameInfo(false), 1000);
+    return () => clearInterval(interval);
+  }, [loadGameInfo, isInitialLoad]);
+
+  // 当 FHEVM 初始化完成且有待解密的手牌时，执行解密
+  useEffect(() => {
+    const decryptCards = async () => {
+      // 如果已经解密成功，不再重复解密
+      if (decryptedCards.card1 !== null && decryptedCards.card2 !== null) {
+        return;
+      }
+
+      if (!pendingDecryption) {
+        return;
+      }
+
+      if (!fhevm.isInitialized) {
+        return;
+      }
+
+      if (!address) {
+        return;
+      }
+
+      if (!state.playerCards || !state.playerCards.card1 || !state.playerCards.card2) {
+        return;
+      }
+
+      if (isDecrypting) {
+        return;
+      }
+
+      setIsDecrypting(true);
+      setPendingDecryption(false);
+
+      try {
+        const signer = await contractService.getSigner();
+
+        // 批量解密两张牌,只需要签名一次!
+        const [card1Value, card2Value] = await fhevm.decryptCards(
+          [state.playerCards.card1, state.playerCards.card2],
+          POKER_TABLE_ADDRESS,
+          address,
+          signer
+        );
+
+        setDecryptedCards({ card1: card1Value, card2: card2Value });
+      } catch (decryptErr) {
+        console.error('❌ 解密手牌失败:', decryptErr);
+        // 解密失败后，允许重试
+        setPendingDecryption(true);
+      } finally {
+        setIsDecrypting(false);
+      }
+    };
+
+    decryptCards();
+  }, [fhevm.isInitialized, pendingDecryption, address, state.playerCards, isDecrypting, decryptedCards]);
+
+  // 监听游戏状态变化，当游戏开始时重置解密状态
+  useEffect(() => {
+    const currentGameState = state.tableInfo ? Number(state.tableInfo[0]) : null;
+
+    // 如果游戏状态从 Waiting(0) 变为 PreFlop(1)，说明游戏刚开始，需要重置解密状态
+    if (previousGameState === 0 && currentGameState === 1) {
+      setDecryptedCards({ card1: null, card2: null });
+      setHasRevealedCards(false);
+      setPendingDecryption(false); // 先重置，等待 loadGameInfo 重新设置
+    }
+
+    // 更新上一次的游戏状态
+    if (currentGameState !== null) {
+      setPreviousGameState(currentGameState);
+    }
+  }, [state.tableInfo, previousGameState]);
+
+  const handleStartGame = async () => {
     try {
-      setTransactionStatus('pending');
-      console.log('🃏 尝试弃牌:', { tableId, address, currentPlayerIndex, myPlayerIndex: Number(myPlayerIndex) });
+      setIsStartingGame(true);
+      setLoading(true);
 
-      await callFold(tableId);
-      setTransactionStatus('success');
+      await contractService.startGame(tableId);
+      setError(null);
 
-      // 刷新游戏状态
+      // 重新加载游戏信息，而不是刷新整个页面
       setTimeout(() => {
-        readTableInfo(tableId).then(setTableInfo).catch(console.error);
+        loadGameInfo();
       }, 1000);
-    } catch (error) {
-      console.error('弃牌失败:', error);
-      setTransactionStatus('error');
-      setTransactionError((error as Error).message);
-      alert('弃牌失败: ' + (error as Error).message);
-    }
-  };
-
-  const handleCheck = async () => {
-    if (!address) {
-      alert('请连接钱包');
-      return;
-    }
-
-    try {
-      setTransactionStatus('pending');
-      console.log('🃏 尝试过牌:', {
-        tableId,
-        address,
-        currentPlayerIndex,
-        myPlayerIndex: Number(myPlayerIndex),
-        isMyTurn: myPlayerIndex !== undefined && Number(myPlayerIndex) === currentPlayerIndex
-      });
-
-      await callCheck(tableId);
-      setTransactionStatus('success');
-
-      // 刷新游戏状态
-      setTimeout(() => {
-        readTableInfo(tableId).then(setTableInfo).catch(console.error);
-      }, 1000);
-    } catch (error) {
-      console.error('过牌失败:', error);
-      setTransactionStatus('error');
-      setTransactionError((error as Error).message);
-      alert('过牌失败: ' + (error as Error).message);
-    }
-  };
-
-  const handleCall = async () => {
-    if (!address) {
-      alert('请连接钱包');
-      return;
-    }
-
-    try {
-      setTransactionStatus('pending');
-      await callCall(tableId);
-      setTransactionStatus('success');
-
-      // 刷新游戏状态
-      setTimeout(() => {
-        readTableInfo(tableId).then(setTableInfo).catch(console.error);
-      }, 1000);
-    } catch (error) {
-      console.error('跟注失败:', error);
-      setTransactionStatus('error');
-      setTransactionError((error as Error).message);
-      alert('跟注失败: ' + (error as Error).message);
+    } catch (err) {
+      setError((err as Error).message);
+      alert('开始游戏失败: ' + (err as Error).message);
+    } finally {
+      setIsStartingGame(false);
+      setLoading(false);
     }
   };
 
   const handleLeaveGame = async () => {
-    console.log('🚪 开始离开游戏流程...');
-
-    if (!address) {
-      alert('❌ 请先连接钱包');
+    if (!window.confirm('确定要离开游戏吗？')) {
       return;
     }
 
     try {
-      setTransactionStatus('pending');
+      setIsLeavingGame(true);
+      setLoading(true);
 
-      // 只有在游戏等待状态才能离开
-      if (gameState !== GameState.Waiting) {
-        const confirmLeave = window.confirm(
-          '⚠️ 游戏正在进行中，离开将被视为弃牌。确定要离开吗？'
-        );
-        if (!confirmLeave) {
-          setTransactionStatus('idle');
-          return;
-        }
-      }
-
-      // 使用 ethers.js 调用合约（按照 dev.md 的方式）
-      console.log('📞 调用 callLeaveTable，tableId:', tableId);
-      await callLeaveTable(tableId);
-
-      console.log('✅ 离开游戏成功！');
-      setTransactionStatus('success');
-
-      // 延迟一下再返回，确保交易已确认
-      setTimeout(() => {
-        onBack();
-      }, 500);
-    } catch (error) {
-      console.error('❌ 离开游戏失败:', error);
-      setTransactionStatus('error');
-      const errorMsg = (error as Error).message;
-
-      // 如果是桌号不匹配的错误，提供强制返回选项
-      if (errorMsg.includes('不在游戏中') || errorMsg.includes('玩家不在')) {
-        const forceReturn = window.confirm(
-          `❌ 无法从合约中离开游戏（${errorMsg}）\n\n是否强制返回大厅？\n\n注意：这可能会导致你的账户被锁定在游戏中。`
-        );
-        if (forceReturn) {
-          console.log('⚠️ 强制返回大厅');
-          onBack();
-        }
-      } else {
-        alert(`❌ 离开失败: ${errorMsg}`);
-      }
+      await contractService.leaveTable(tableId);
+      onBack();
+    } catch (err) {
+      setError((err as Error).message);
+      alert('离开失败: ' + (err as Error).message);
     } finally {
-      setTransactionStatus('idle');
+      setIsLeavingGame(false);
+      setLoading(false);
     }
   };
 
-  const handleBet = async (amount: number) => {
-    console.log('🎯 开始处理加注:', { amount, tableId, address });
+  const handleCheck = async () => {
+    try {
+      setActionInProgress(true);
+      setLoading(true);
 
-    // 前置检查
-    if (!fhevm.isInitialized) {
-      console.error('❌ FHEVM not initialized');
-      alert('❌ FHEVM未初始化，请等待初始化完成');
-      return;
-    }
+      // 检查游戏状态
+      const tableInfo = await contractService.getTableInfo(tableId);
+      if (tableInfo.state === 0) {
+        throw new Error('游戏还未开始，请等待游戏开始');
+      }
+      if (tableInfo.state === 6) {
+        throw new Error('游戏已结束，请创建新游戏');
+      }
 
-    if (!address) {
-      console.error('❌ No wallet address');
-      alert('❌ 请先连接钱包');
-      return;
-    }
+      await contractService.check(tableId);
+      setError(null);
 
-    // 检查是否轮到自己
-    if (myPlayerIndex === undefined || Number(myPlayerIndex) !== currentPlayerIndex) {
-      console.error('❌ Not your turn!', {
-        myPlayerIndex: myPlayerIndex !== undefined ? Number(myPlayerIndex) : 'undefined',
-        currentPlayerIndex
-      });
-      alert(`❌ 不是你的回合！当前轮到玩家 ${currentPlayerIndex}，你是玩家 ${myPlayerIndex !== undefined ? Number(myPlayerIndex) : '未知'}`);
-      return;
+      // 立即刷新游戏状态
+      await loadGameInfo();
+    } catch (err) {
+      const errorMsg = (err as Error).message;
+      setError(errorMsg);
+      alert('过牌失败: ' + errorMsg);
+    } finally {
+      setActionInProgress(false);
+      setLoading(false);
     }
+  };
+
+  const handleCall = async () => {
+    try {
+      setActionInProgress(true);
+      setLoading(true);
+
+      // 检查游戏状态
+      const tableInfo = await contractService.getTableInfo(tableId);
+
+      if (tableInfo.state === 0) {
+        throw new Error('游戏还未开始，请等待游戏开始');
+      }
+
+      if (tableInfo.state === 6) {
+        throw new Error('游戏已结束，请创建新游戏');
+      }
+
+      await contractService.call(tableId);
+      setError(null);
+
+      // 立即刷新游戏状态
+      await loadGameInfo();
+    } catch (err) {
+      const errorMsg = (err as Error).message;
+      setError(errorMsg);
+      alert('跟注失败: ' + errorMsg);
+    } finally {
+      setActionInProgress(false);
+      setLoading(false);
+    }
+  };
+
+  const handleBet = async () => {
+    const amountStr = prompt('请输入下注金额:');
+    if (!amountStr) return;
 
     try {
-      console.log('🔐 开始加密下注金额:', amount);
+      setActionInProgress(true);
+      setLoading(true);
 
-      // 使用FHEVM加密下注金额
+      const amount = parseInt(amountStr, 10);
+      if (isNaN(amount) || amount <= 0) {
+        throw new Error('请输入有效的金额');
+      }
+
+      // 检查玩家是否在游戏中
+      const playerAddress = address;
+      if (!playerAddress) {
+        throw new Error('未连接钱包');
+      }
+
+      // 重新加载游戏信息，确保状态是最新的
+      const tableInfo = await contractService.getTableInfo(tableId);
+
+      if (tableInfo.state === 0) {
+        throw new Error('游戏还未开始，请等待游戏开始');
+      }
+
+      if (tableInfo.state === 6) {
+        throw new Error('游戏已结束，请创建新游戏');
+      }
+
+      // 加密下注金额
       const encrypted = await fhevm.encryptBetAmount(amount);
-      console.log('✅ 加密完成:', {
-        dataType: typeof encrypted.encryptedAmount,
-        dataIsUint8Array: encrypted.encryptedAmount instanceof Uint8Array,
-        dataLength: encrypted.encryptedAmount?.length,
-        proofType: typeof encrypted.inputProof,
-        proofIsUint8Array: encrypted.inputProof instanceof Uint8Array,
-        proofLength: encrypted.inputProof?.length,
-      });
 
-      // 使用 ethers.js 调用合约（按照 dev.md 的方式）
-      // ethers.js 会自动处理 Uint8Array 的序列化
-      await callBet(tableId, encrypted.encryptedAmount, encrypted.inputProof);
+      // 调用合约
+      await contractService.bet(tableId, amount, encrypted.encryptedAmount, encrypted.inputProof);
 
-      console.log('✅ 加注成功！');
-      alert('✅ 加注成功！');
+      setError(null);
 
-      // 刷新游戏状态
-      setTimeout(() => {
-        readTableInfo(tableId).then(setTableInfo).catch(console.error);
-      }, 1000);
-    } catch (error) {
-      console.error('❌ 加注失败:', error);
-      const errorMsg = (error as Error).message;
-      alert(`❌ 加注失败: ${errorMsg}`);
+      // 立即刷新游戏状态
+      await loadGameInfo();
+    } catch (err) {
+      const errorMsg = (err as Error).message;
+      setError(errorMsg);
+      alert('下注失败: ' + errorMsg);
+    } finally {
+      setActionInProgress(false);
+      setLoading(false);
     }
   };
 
-  // 模拟玩家数据 (实际应从合约读取)
-  const mockPlayers = Array.from({ length: Number(playerCount) }, (_, i) => ({
-    address: i === 0 ? (address || `0x${i.toString().padStart(40, '0')}`) : `0x${i.toString().padStart(40, '0')}`,
-    balance: 1000,
-    currentBet: 0,
-    isActive: true,
-    hasFolded: false,
-    lastAction: 0,
-    // 只有在游戏已开始时才显示手牌，否则显示空数组（会显示为牌背）
-    cards: i === 0 && gameState !== GameState.Waiting ? [0, 13] : [],
-    encryptedCards: i === 0 ? playerCards : null, // 显示加密手牌信息
-  }));
+  const handleFold = async () => {
+    try {
+      setActionInProgress(true);
+      setLoading(true);
 
-  // 座位布局 (6人桌)
-  const seatPositions = [
-    'bottom',    // 0 - 玩家自己
-    'left',      // 1
-    'top',       // 2
-    'top',       // 3
-    'top',       // 4
-    'right',     // 5
-  ];
+      // 检查游戏状态
+      const tableInfo = await contractService.getTableInfo(tableId);
+      if (tableInfo.state === 0) {
+        throw new Error('游戏还未开始，请等待游戏开始');
+      }
+      if (tableInfo.state === 6) {
+        throw new Error('游戏已结束，请创建新游戏');
+      }
+
+      await contractService.fold(tableId);
+      setError(null);
+
+      // 立即刷新游戏状态
+      await loadGameInfo();
+    } catch (err) {
+      const errorMsg = (err as Error).message;
+      setError(errorMsg);
+      alert('弃牌失败: ' + errorMsg);
+    } finally {
+      setActionInProgress(false);
+      setLoading(false);
+    }
+  };
+
+  const gameState = state.tableInfo ? Number(state.tableInfo[0]) : 0;
+  const playerCount = state.tableInfo ? Number(state.tableInfo[1]) : 0;
+  const smallBlind = state.tableInfo ? Number(state.tableInfo[8]) : 0;
+  const bigBlind = state.tableInfo ? Number(state.tableInfo[9]) : 0;
+  const pot = playersInfo ? Number(playersInfo.pot) : 0;
+
+  const getStateName = (state: number): string => {
+    const stateKeys: { [key: number]: string } = {
+      0: 'game.states.waiting',
+      1: 'game.states.preflop',
+      2: 'game.states.flop',
+      3: 'game.states.turn',
+      4: 'game.states.river',
+      5: 'game.states.showdown',
+      6: 'game.states.ended'
+    };
+    return t(stateKeys[state] || 'game.states.waiting');
+  };
+
+  // 加载状态
+  if (state.isLoading && !state.tableInfo) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-900 to-green-800 p-8 flex items-center justify-center">
+        <div className="bg-white rounded-lg shadow-lg p-8 text-center">
+          <div className="text-4xl mb-4">🎮</div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">加载游戏中...</h2>
+          <p className="text-gray-600">正在获取游戏信息，请稍候</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen p-4 relative overflow-hidden">
-      {/* 背景装饰 */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-20 left-10 w-96 h-96 bg-yellow-400/5 rounded-full blur-3xl animate-pulse"></div>
-        <div className="absolute bottom-20 right-10 w-96 h-96 bg-green-400/5 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
-      </div>
-
-      {/* 顶部栏 */}
-      <div className="max-w-7xl mx-auto mb-6 relative z-10">
-        <div className="glass-effect rounded-2xl shadow-2xl p-5 flex items-center justify-between border-2 border-white/20">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-full gold-gradient flex items-center justify-center shadow-lg">
-              <span className="text-2xl">🎴</span>
-            </div>
-            <div>
-              <h2 className="text-2xl font-black text-white flex items-center gap-2">
-                <span>游戏桌</span>
-                <span className="text-yellow-400">#{tableId}</span>
-              </h2>
-              <p className="text-sm text-white/70 font-medium flex items-center gap-2">
-                <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
-                <span>玩家: {playerCount}/6</span>
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={handleLeaveGame}
-            disabled={transactionStatus === 'pending'}
-            className="group relative overflow-hidden px-8 py-4 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 disabled:from-gray-500 disabled:to-gray-600 text-white font-bold rounded-xl transition-all duration-300 shadow-lg hover:shadow-2xl hover:scale-105 disabled:scale-100 disabled:cursor-not-allowed"
-            style={{ zIndex: 9999 }}
-          >
-            <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
-            <span className="relative flex items-center gap-2">
-              <span className="text-xl">{transactionStatus === 'pending' ? '⏳' : '🚪'}</span>
-              <span>{transactionStatus === 'pending' ? '离开中...' : '离开游戏'}</span>
-            </span>
-          </button>
-        </div>
-      </div>
-
-      {/* 游戏桌主区域 */}
-      <div className="max-w-7xl mx-auto relative z-10">
-        <div className="relative glass-effect rounded-[3rem] shadow-2xl p-10 border-4 border-amber-700/50">
-          {/* 椭圆形桌面边框 - 多层效果 */}
-          <div className="absolute inset-6 border-4 border-amber-600/30 rounded-[50%] opacity-40" />
-          <div className="absolute inset-8 border-2 border-amber-500/20 rounded-[50%] opacity-30" />
-
-          {/* 桌面中心装饰 */}
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-32 h-32 bg-gradient-to-br from-yellow-400/10 to-orange-400/10 rounded-full blur-2xl"></div>
-
-          {/* 当前玩家提示 - 显示在桌面顶部 */}
-          {gameState !== GameState.Waiting && gameState !== GameState.Finished && (
-            <div className="absolute top-6 left-1/2 transform -translate-x-1/2 z-30">
-              {myPlayerIndex !== null && myPlayerIndex === currentPlayerIndex ? (
-                <div className="relative">
-                  <div className="absolute inset-0 bg-gradient-to-r from-green-400 to-emerald-400 rounded-full blur-lg opacity-75 animate-pulse"></div>
-                  <div className="relative bg-gradient-to-r from-green-500 via-green-400 to-emerald-500 text-white px-8 py-4 rounded-full shadow-2xl animate-pulse border-2 border-green-300">
-                    <span className="text-lg font-black flex items-center gap-2">
-                      <span className="text-2xl">✅</span>
-                      <span>轮到你了！请选择操作</span>
-                    </span>
-                  </div>
-                </div>
-              ) : (
-                <div className="relative">
-                  <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-purple-400 rounded-full blur-lg opacity-50"></div>
-                  <div className="relative glass-effect px-8 py-4 rounded-full shadow-2xl border-2 border-blue-300/50">
-                    <span className="text-lg font-bold text-white flex items-center gap-2">
-                      <span className="text-2xl">⏳</span>
-                      <span>等待玩家 #{currentPlayerIndex + 1} 操作...</span>
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* 玩家座位布局 */}
-          <div className="relative h-[600px]">
-            {/* 中央 - 公共牌和奖池 */}
-            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-              <CommunityCards
-                cards={communityCards}
-                pot={pot}
-                gameState={gameState}
-              />
-            </div>
-
-            {/* 玩家座位 */}
-            {mockPlayers.map((player, index) => {
-              const position = seatPositions[index] as 'top' | 'left' | 'right' | 'bottom';
-              let positionClass = '';
-
-              switch (position) {
-                case 'bottom':
-                  positionClass = 'absolute bottom-0 left-1/2 transform -translate-x-1/2';
-                  break;
-                case 'top':
-                  if (index === 2) positionClass = 'absolute top-0 left-1/4 transform -translate-x-1/2';
-                  else if (index === 3) positionClass = 'absolute top-0 left-1/2 transform -translate-x-1/2';
-                  else positionClass = 'absolute top-0 right-1/4 transform translate-x-1/2';
-                  break;
-                case 'left':
-                  positionClass = 'absolute left-0 top-1/2 transform -translate-y-1/2';
-                  break;
-                case 'right':
-                  positionClass = 'absolute right-0 top-1/2 transform -translate-y-1/2';
-                  break;
-              }
-
-              return (
-                <div key={index} className={positionClass}>
-                  <PlayerSeat
-                    address={player.address}
-                    balance={player.balance}
-                    currentBet={player.currentBet}
-                    isActive={player.isActive}
-                    hasFolded={player.hasFolded}
-                    isCurrentPlayer={index === currentPlayerIndex}
-                    isDealer={index === dealerIndex}
-                    isSmallBlind={index === smallBlindIndex}
-                    isBigBlind={index === bigBlindIndex}
-                    lastAction={player.lastAction}
-                    cards={player.cards}
-                    showCards={index === 0} // 只显示自己的牌
-                    position={position}
-                    gameStarted={gameState !== GameState.Waiting} // 传递游戏是否已开始
-                  />
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* 底部 - 操作面板 */}
-        <div className="mt-6 max-w-2xl mx-auto">
-          <BettingPanel
-            isMyTurn={myPlayerIndex !== undefined && Number(myPlayerIndex) === currentPlayerIndex}
-            myBalance={1000}
-            currentBet={0}
-            minRaise={20}
-            onFold={handleFold}
-            onCheck={handleCheck}
-            onCall={handleCall}
-            onBet={handleBet}
-            disabled={transactionStatus === 'pending'}
-          />
-
-          {/* 交易状态提示 */}
-          {transactionStatus === 'pending' && (
-            <div className="mt-4 bg-blue-50 border-l-4 border-blue-500 text-blue-700 p-4 rounded">
-              <p className="font-bold">⏳ 交易处理中...</p>
-              <p className="text-sm mt-1">请在钱包中确认交易</p>
-            </div>
-          )}
-
-          {transactionError && (
-            <div className="mt-4 bg-red-50 border-l-4 border-red-500 text-red-700 p-4 rounded">
-              <p className="font-bold">❌ 交易失败</p>
-              <p className="text-sm mt-1">{transactionError}</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* FHEVM状态和调试信息 */}
-      <div className="fixed bottom-6 right-6 glass-effect rounded-2xl shadow-2xl p-5 text-xs max-w-sm space-y-3 border-2 border-white/20 z-50">
-        {/* FHEVM状态 */}
-        <div className="border-b border-white/20 pb-3">
-          <div className="font-black mb-2 text-white flex items-center gap-2">
-            <span className="text-lg">🔐</span>
-            <span>FHEVM Status</span>
-          </div>
-          <div className={`font-bold ${fhevm.isInitialized ? 'text-green-400' : 'text-yellow-400'}`}>
-            {fhevm.isInitializing ? '⏳ Initializing...' :
-             fhevm.isInitialized ? '✅ Ready' :
-             fhevm.error ? '❌ Error' : '⏸️ Not Started'}
-          </div>
-          {fhevm.error && (
-            <div className="text-red-400 mt-2 p-2 bg-red-500/10 rounded-lg border border-red-400/30">
-              {fhevm.error.message}
-            </div>
-          )}
-        </div>
-
-        {/* 游戏信息 */}
-        <div className="space-y-1.5">
-          <div className="font-black mb-2 text-white flex items-center gap-2">
-            <span className="text-lg">🎮</span>
-            <span>Game Info</span>
-          </div>
-          <div className="text-white/80"><span className="text-white/60">State:</span> <span className="font-bold">{gameState}</span></div>
-          <div className="text-white/80"><span className="text-white/60">Players:</span> <span className="font-bold">{playerCount}</span></div>
-          <div className="text-white/80"><span className="text-white/60">Current:</span> <span className="font-bold">{currentPlayerIndex}</span></div>
-          <div className="text-white/80"><span className="text-white/60">Cards:</span> <span className="font-bold">{communityCards.length}</span></div>
-          <div className="text-white/80"><span className="text-white/60">My Address:</span> <span className="font-mono font-bold">{address?.slice(0, 6)}...{address?.slice(-4)}</span></div>
-          <div className="text-white/80"><span className="text-white/60">My Index:</span> <span className="font-bold">{myPlayerIndex !== undefined ? Number(myPlayerIndex) : 'Loading...'}</span></div>
-          <div className={`font-bold p-2 rounded-lg ${myPlayerIndex !== undefined && Number(myPlayerIndex) === currentPlayerIndex ? 'bg-green-500/20 text-green-400 border border-green-400/30' : 'bg-red-500/20 text-red-400 border border-red-400/30'}`}>
-            Is My Turn: {myPlayerIndex !== undefined && Number(myPlayerIndex) === currentPlayerIndex ? '✅ YES' : '❌ NO'}
-          </div>
-          <div className="text-white/80"><span className="text-white/60">Turn Status:</span> <span className="font-bold">Player {currentPlayerIndex} should act</span></div>
-        </div>
-
-        {/* 手牌信息 */}
-        {playerCards && (
-          <div className="border-t border-white/20 pt-3">
-            <div className="font-black mb-2 text-white flex items-center gap-2">
-              <span className="text-lg">🃏</span>
-              <span>My Cards (Encrypted)</span>
-            </div>
-            <div className="space-y-1.5 text-white/70 font-mono">
-              <div className="p-2 bg-white/5 rounded-lg border border-white/10">
-                <div className="text-white/50 text-[10px] mb-1">Card 1:</div>
-                <div className="truncate">{playerCards.card1.slice(0, 20)}...</div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-800 via-slate-900 to-black p-4">
+      <div className="max-w-7xl mx-auto">
+        {/* 头部信息栏 */}
+        <div className="bg-gradient-to-r from-slate-800 to-slate-700 rounded-xl shadow-2xl p-4 mb-4 border border-slate-600">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="bg-yellow-500 text-black font-bold px-4 py-2 rounded-lg shadow-lg">
+                {t('game.table_number', { number: tableId })}
               </div>
-              <div className="p-2 bg-white/5 rounded-lg border border-white/10">
-                <div className="text-white/50 text-[10px] mb-1">Card 2:</div>
-                <div className="truncate">{playerCards.card2.slice(0, 20)}...</div>
+              <div className="text-white">
+                <div className="text-sm text-slate-300">{t('game.game_state')}</div>
+                <div className="font-bold text-lg">{getStateName(gameState)}</div>
+              </div>
+              <div className="text-white">
+                <div className="text-sm text-slate-300">{t('lobby.players')}</div>
+                <div className="font-bold text-lg">{playerCount}/6</div>
+              </div>
+              <div className="text-white">
+                <div className="text-sm text-slate-300">{t('lobby.blinds')}</div>
+                <div className="font-bold text-lg">{smallBlind}/{bigBlind}</div>
               </div>
             </div>
+            <div className="flex items-center gap-4">
+              <LanguageSwitcher />
+              <button
+                onClick={handleLeaveGame}
+                disabled={isLeavingGame || state.isLoading}
+                className="bg-red-600 hover:bg-red-700 disabled:bg-gray-500 text-white font-semibold py-2 px-6 rounded-lg shadow-lg transition-all"
+              >
+                {isLeavingGame ? t('game.leaving') : `🚪 ${t('game.leave_game')}`}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* 扑克桌主区域 */}
+        <div className="relative">
+          {/* 扑克桌 */}
+          <div className="relative bg-gradient-to-br from-green-700 via-green-800 to-green-900 rounded-[50%] shadow-2xl border-8 border-amber-900 p-12 mx-auto" style={{ maxWidth: '900px', aspectRatio: '16/10' }}>
+            {/* 桌面内边框 */}
+            <div className="absolute inset-8 border-4 border-amber-700 rounded-[50%] opacity-50"></div>
+
+            {/* 奖池区域 */}
+            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center">
+              <div className="bg-black bg-opacity-40 backdrop-blur-sm rounded-xl px-6 py-3 border-2 border-yellow-500 shadow-xl">
+                <div className="text-yellow-400 text-sm font-semibold mb-1">💰 {t('game.pot')}</div>
+                <div className="text-white text-2xl font-bold">{pot}</div>
+              </div>
+            </div>
+
+            {/* 公共牌区域 - 使用普通尺寸卡牌 (w-16 h-24) */}
+            <div className="absolute top-1/3 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+              <div className="flex gap-3 justify-center">
+                {[0, 1, 2, 3, 4].map((idx) => {
+                  const card = state.communityCards?.[idx];
+                  const isRevealed = card !== undefined && card !== null && Number(card) !== 0;
+                  return (
+                    <PokerCard key={idx} card={isRevealed ? card : null} isHidden={!isRevealed} />
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 玩家座位 - 环绕桌子 */}
+            {playersInfo && (() => {
+              const players = playersInfo.players || [];
+              const playerBets = playersInfo.playerBets || [];
+              const playerFolded = playersInfo.playerFolded || [];
+              const currentPlayerIndex = playersInfo.currentPlayerIndex;
+              const dealerIndex = playersInfo.dealerIndex;
+
+              // 座位位置配置 (6个座位环绕桌子)
+              const seatPositions = [
+                { top: '85%', left: '50%', transform: 'translate(-50%, -50%)' }, // 底部中间 (玩家自己)
+                { top: '70%', left: '10%', transform: 'translate(-50%, -50%)' }, // 左下
+                { top: '35%', left: '5%', transform: 'translate(-50%, -50%)' },  // 左上
+                { top: '10%', left: '50%', transform: 'translate(-50%, -50%)' }, // 顶部中间
+                { top: '35%', left: '95%', transform: 'translate(-50%, -50%)' }, // 右上
+                { top: '70%', left: '90%', transform: 'translate(-50%, -50%)' }, // 右下
+              ];
+
+              return seatPositions.map((pos, idx) => {
+                const player = players[idx];
+                const isOccupied = player && player !== '0x0000000000000000000000000000000000000000';
+                const isCurrentPlayer = idx === currentPlayerIndex;
+                const isDealer = idx === dealerIndex;
+                const isFolded = playerFolded[idx];
+                const bet = playerBets[idx] ? Number(playerBets[idx]) : 0;
+                const isMe = address && player && player.toLowerCase() === address.toLowerCase();
+
+                return (
+                  <div
+                    key={idx}
+                    className="absolute"
+                    style={pos}
+                  >
+                    {isOccupied ? (
+                      <div className="relative">
+                        {/* 当前玩家的发光效果 */}
+                        {isCurrentPlayer && (
+                          <div className="absolute -inset-2 bg-yellow-400 rounded-lg opacity-50 blur-md animate-pulse"></div>
+                        )}
+
+                        {/* 玩家信息卡片 */}
+                        <div className={`relative bg-gradient-to-br ${isMe ? 'from-blue-600 to-blue-800' : 'from-slate-700 to-slate-800'} rounded-lg shadow-xl border-4 ${isCurrentPlayer ? 'border-yellow-400 shadow-yellow-400/50' : 'border-slate-600'} min-w-32 transition-all duration-300 p-3`}>
+                          {/* 当前玩家指示器 - 放在卡片内部顶部 */}
+                          {isCurrentPlayer && (
+                            <div className="mb-2 bg-yellow-400 text-xs font-bold px-3 py-1 rounded-full shadow-lg whitespace-nowrap text-center" style={{ color: '#00ff00' }}>
+                              ⏰ {t('game.player_status.in_action')}
+                            </div>
+                          )}
+
+                          {/* 玩家地址 */}
+                          <div className={`!text-white text-xs font-mono mb-2 ${isCurrentPlayer ? 'font-bold' : ''}`} style={{ color: '#ffffff' }}>
+                            {isMe ? `👤 ${t('game.player_status.you')}` : `${player.slice(0, 6)}...${player.slice(-4)}`}
+                          </div>
+
+                          {/* 状态 */}
+                          <div className="flex items-center justify-between">
+                            <div className={`text-xs font-semibold !text-white`} style={{ color: '#ffffff' }}>
+                              {isFolded ? t('game.player_status.folded') : t('game.player_status.active')}
+                            </div>
+                            {bet > 0 && (
+                              <div className="bg-yellow-500 text-black text-xs font-bold px-2 py-0.5 rounded">
+                                {bet}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 庄家标记 - 放在卡片外部下方 */}
+                        {isDealer && (
+                          <div className="absolute top-full mt-1 left-1/2 -translate-x-1/2 bg-yellow-500 text-black text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center shadow-lg z-10">
+                            D
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="bg-slate-800 bg-opacity-50 rounded-lg p-3 border-2 border-dashed border-slate-600 min-w-32">
+                        <div className="!text-white text-xs text-center" style={{ color: '#ffffff' }}>{t('game.empty_seat')}</div>
+                      </div>
+                    )}
+                  </div>
+                );
+              });
+            })()}
+          </div>
+
+          {/* 你的手牌 - 显示在桌子下方，使用普通尺寸卡牌 (w-16 h-24) */}
+          <div className="mt-6 flex justify-center">
+            <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-6 shadow-2xl border-2 border-slate-600">
+              <div className="text-white text-lg font-semibold mb-4 text-center">🎴 {t('game.your_hand')}</div>
+              <div className="flex gap-6 justify-center">
+                {gameState === 0 ? (
+                  // 游戏未开始，显示牌背
+                  <>
+                    <PokerCard isHidden />
+                    <PokerCard isHidden />
+                  </>
+                ) : decryptedCards.card1 !== null && decryptedCards.card2 !== null ? (
+                  // 已解密，显示明牌
+                  <>
+                    <PokerCard card={decryptedCards.card1} />
+                    <PokerCard card={decryptedCards.card2} />
+                  </>
+                ) : isDecrypting ? (
+                  // 解密中
+                  <>
+                    <div className="w-16 h-24 bg-slate-700 rounded-lg flex items-center justify-center animate-pulse">
+                      <div className="text-white text-xs">{t('game.decrypting')}</div>
+                    </div>
+                    <div className="w-16 h-24 bg-slate-700 rounded-lg flex items-center justify-center animate-pulse">
+                      <div className="text-white text-xs">{t('game.decrypting')}</div>
+                    </div>
+                  </>
+                ) : state.playerCards ? (
+                  // 有加密手牌，显示牌背
+                  <>
+                    <PokerCard isHidden />
+                    <PokerCard isHidden />
+                  </>
+                ) : (
+                  // 其他情况（不应该出现）
+                  <>
+                    <div className="w-16 h-24 bg-slate-700 rounded-lg flex items-center justify-center">
+                      <div className="text-slate-500 text-xs">{t('game.waiting')}</div>
+                    </div>
+                    <div className="w-16 h-24 bg-slate-700 rounded-lg flex items-center justify-center">
+                      <div className="text-slate-500 text-xs">{t('game.waiting')}</div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 错误提示 */}
+        {state.error && (
+          <div className="mt-4 bg-red-900 bg-opacity-90 border-l-4 border-red-500 text-red-100 p-4 rounded-lg shadow-lg">
+            <p className="font-bold">❌ 错误</p>
+            <p className="text-sm mt-1">{state.error}</p>
           </div>
         )}
+
+        {/* 游戏操作面板 */}
+        <div className="mt-6 bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl shadow-2xl p-6 border-2 border-slate-700">
+
+          {/* 游戏结束 - 显示获胜信息 */}
+          {gameState === 6 && (
+            <div className="mb-6 p-8 bg-gradient-to-r from-yellow-600 via-yellow-500 to-yellow-600 rounded-2xl shadow-2xl border-4 border-yellow-400">
+              <div className="text-center">
+                <div className="text-8xl mb-4 animate-bounce">🏆</div>
+                <h4 className="text-4xl font-bold text-white mb-4 drop-shadow-lg">游戏结束!</h4>
+                {winnerInfo && winnerInfo.winnerIndex !== 255 ? (
+                  <div>
+                    {address && winnerInfo.winnerAddress.toLowerCase() === address.toLowerCase() ? (
+                      <>
+                        <p className="text-3xl font-bold text-green-900 mb-3 animate-pulse">🎉 恭喜你获胜!</p>
+                        <div className="bg-white bg-opacity-20 backdrop-blur-sm rounded-lg p-4 inline-block">
+                          <p className="text-white font-mono">
+                            {winnerInfo.winnerAddress.slice(0, 6)}...{winnerInfo.winnerAddress.slice(-4)}
+                          </p>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-2xl font-bold text-white mb-3">游戏结束</p>
+                        <div className="bg-white bg-opacity-20 backdrop-blur-sm rounded-lg p-4 inline-block">
+                          <p className="text-sm text-yellow-100 mb-1">获胜者</p>
+                          <p className="text-white font-mono">
+                            {winnerInfo.winnerAddress.slice(0, 6)}...{winnerInfo.winnerAddress.slice(-4)}
+                          </p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-white">正在加载获胜者信息...</p>
+                )}
+                <button
+                  onClick={onBack}
+                  className="mt-6 bg-white hover:bg-gray-100 text-yellow-600 font-bold py-3 px-8 rounded-xl shadow-lg transform hover:scale-105 transition-all"
+                >
+                  🏠 返回大厅
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 等待玩家加入提示 - 仅在游戏等待状态且玩家数 < 2 时显示 */}
+          {gameState === 0 && playerCount < 2 && (
+            <div className="mb-6 p-6 bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl shadow-xl border-2 border-blue-400">
+              <div className="text-center">
+                <div className="text-4xl mb-3">⏳</div>
+                <p className="text-white font-semibold text-lg mb-2">等待其他玩家加入...</p>
+                <p className="text-blue-100 text-sm">至少需要 2 名玩家才能开始游戏</p>
+              </div>
+            </div>
+          )}
+
+          {/* 开始游戏按钮 - 仅在游戏等待状态且玩家数 >= 2 时显示 */}
+          {gameState === 0 && playerCount >= 2 && (
+            <div className="mb-6 p-6 bg-gradient-to-r from-purple-600 to-purple-700 rounded-xl shadow-xl border-2 border-purple-400">
+              {(() => {
+                const dealerIndex = state.tableInfo ? Number(state.tableInfo[5]) : null;
+                const isDealer = myPlayerIndex !== null && dealerIndex !== null && myPlayerIndex === dealerIndex;
+
+                if (isDealer) {
+                  return (
+                    <>
+                      <p className="text-white font-semibold mb-4 text-center text-lg">✅ 准备就绪！</p>
+                      <button
+                        onClick={handleStartGame}
+                        disabled={isStartingGame || state.isLoading}
+                        className="w-full bg-white hover:bg-gray-100 disabled:bg-gray-400 text-purple-600 font-bold py-4 px-6 rounded-xl shadow-lg transform hover:scale-105 transition-all text-lg"
+                      >
+                        {isStartingGame ? `⏳ ${t('game.starting')}` : `🎮 ${t('game.start_game')}`}
+                      </button>
+                    </>
+                  );
+                } else {
+                  const dealerAddress = playersInfo && dealerIndex !== null ? playersInfo.players[dealerIndex] : null;
+                  const dealerDisplay = dealerAddress ? `${dealerAddress.slice(0, 6)}...${dealerAddress.slice(-4)}` : '庄家';
+                  return (
+                    <p className="text-white font-semibold text-center text-lg">⏳ 等待 {dealerDisplay} 开始游戏...</p>
+                  );
+                }
+              })()}
+            </div>
+          )}
+
+          {/* Showdown 阶段 - 公开手牌 */}
+          {gameState === 5 && decryptedCards.card1 !== null && decryptedCards.card2 !== null && !hasRevealedCards && (
+            <div className="mb-6 p-6 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-xl shadow-xl border-2 border-purple-400">
+              <h4 className="text-2xl font-bold text-white mb-3 text-center">🎴 摊牌阶段</h4>
+              <p className="text-purple-100 mb-4 text-center">请公开你的手牌以参与比牌</p>
+              <button
+                onClick={async () => {
+                  try {
+                    setActionInProgress(true);
+                    await contractService.revealCards(tableId, decryptedCards.card1!, decryptedCards.card2!);
+                    setHasRevealedCards(true); // 立即更新状态，避免重复点击
+                    await loadGameInfo();
+                  } catch (err) {
+                    console.error('❌ 公开手牌失败:', err);
+                    alert('公开手牌失败: ' + (err as Error).message);
+                    setHasRevealedCards(false); // 如果失败，重置状态
+                  } finally {
+                    setActionInProgress(false);
+                  }
+                }}
+                disabled={actionInProgress}
+                className="w-full bg-white hover:bg-gray-100 disabled:bg-gray-400 text-purple-600 font-bold py-4 px-6 rounded-xl shadow-lg transform hover:scale-105 transition-all"
+              >
+                {actionInProgress ? '⏳ 公开中...' : '🃏 公开手牌'}
+              </button>
+            </div>
+          )}
+
+          {/* Showdown 阶段 - 已公开手牌提示 */}
+          {gameState === 5 && hasRevealedCards && (
+            <div className="mb-6 p-6 bg-gradient-to-r from-green-600 to-emerald-600 rounded-xl shadow-xl border-2 border-green-400">
+              <h4 className="text-2xl font-bold text-white mb-2 text-center">✅ 手牌已公开</h4>
+              <p className="text-green-100 text-center">等待其他玩家公开手牌...</p>
+            </div>
+          )}
+
+          {/* 轮流提示 */}
+          {myPlayerIndex !== null && state.tableInfo && gameState !== 0 && gameState !== 5 && gameState !== 6 && (
+            <div className="mb-6">
+              {(() => {
+                const currentPlayerIndex = Number(state.tableInfo[3]);
+                return myPlayerIndex === currentPlayerIndex ? (
+                  <div className="p-4 bg-gradient-to-r from-green-500 to-green-600 rounded-xl shadow-lg border-2 border-green-400 animate-pulse">
+                    <p className="text-white font-bold text-center text-lg">✅ {t('game.your_turn_action')}</p>
+                  </div>
+                ) : (
+                  <div className="p-4 bg-slate-700 bg-opacity-50 rounded-xl border-2 border-slate-600">
+                    <p className="text-slate-300 text-center">⏳ {t('game.waiting_for_other_players')}</p>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* 游戏操作按钮 - 仅在非 Showdown 和非 Finished 阶段显示 */}
+          {gameState !== 5 && gameState !== 6 && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {(() => {
+                const currentPlayerIndex = state.tableInfo ? Number(state.tableInfo[3]) : null;
+                const isMyTurn = myPlayerIndex !== null && currentPlayerIndex !== null && myPlayerIndex === currentPlayerIndex;
+                // 当游戏未开始或玩家数量不足时，禁用所有按钮
+                const isDisabled = actionInProgress || state.isLoading || !isMyTurn || gameState === 0 || playerCount < 2;
+
+                return (
+                  <>
+                  <button
+                    onClick={handleCheck}
+                    disabled={isDisabled}
+                    className="bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 disabled:from-gray-500 disabled:to-gray-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg transform hover:scale-105 disabled:scale-100 transition-all border-2 border-blue-400 disabled:border-gray-500"
+                    title={!isMyTurn ? t('game.not_your_turn') : ''}
+                  >
+                    <div className="text-2xl mb-1">✋</div>
+                    <div>{actionInProgress ? t('game.processing') : t('game.actions.check')}</div>
+                  </button>
+                  <button
+                    onClick={handleCall}
+                    disabled={isDisabled}
+                    className="bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 disabled:from-gray-500 disabled:to-gray-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg transform hover:scale-105 disabled:scale-100 transition-all border-2 border-green-400 disabled:border-gray-500"
+                    title={!isMyTurn ? t('game.not_your_turn') : ''}
+                  >
+                    <div className="text-2xl mb-1">💰</div>
+                    <div>{actionInProgress ? t('game.processing') : t('game.actions.call')}</div>
+                  </button>
+                  <button
+                    onClick={handleBet}
+                    disabled={isDisabled}
+                    className="bg-gradient-to-br from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700 disabled:from-gray-500 disabled:to-gray-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg transform hover:scale-105 disabled:scale-100 transition-all border-2 border-yellow-400 disabled:border-gray-500"
+                    title={!isMyTurn ? t('game.not_your_turn') : ''}
+                  >
+                    <div className="text-2xl mb-1">📈</div>
+                    <div>{actionInProgress ? t('game.processing') : t('game.actions.raise')}</div>
+                  </button>
+                  <button
+                    onClick={handleFold}
+                    disabled={isDisabled}
+                    className="bg-gradient-to-br from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 disabled:from-gray-500 disabled:to-gray-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg transform hover:scale-105 disabled:scale-100 transition-all border-2 border-red-400 disabled:border-gray-500"
+                    title={!isMyTurn ? t('game.not_your_turn') : ''}
+                  >
+                    <div className="text-2xl mb-1">🚫</div>
+                    <div>{actionInProgress ? t('game.processing') : t('game.actions.fold')}</div>
+                  </button>
+                </>
+              );
+            })()}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
 }
+

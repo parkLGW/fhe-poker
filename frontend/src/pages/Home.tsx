@@ -1,8 +1,8 @@
 import { useAccount, useConnect, useDisconnect, useChainId, useSwitchChain } from 'wagmi';
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { LobbyNew } from './LobbyNew';
-import { GameNew } from './GameNew';
+import { Lobby } from './Lobby';
+import { Game } from './Game';
 import { GameProvider } from '../store/gameStore.tsx';
 import { LanguageSwitcher } from '../components/layout/LanguageSwitcher';
 
@@ -180,7 +180,7 @@ export function Home() {
   if (selectedTableId !== null) {
     return (
       <GameProvider>
-        <GameNew tableId={selectedTableId} onBack={() => setSelectedTableId(null)} />
+        <Game tableId={selectedTableId} onBack={() => setSelectedTableId(null)} />
       </GameProvider>
     );
   }
@@ -188,7 +188,7 @@ export function Home() {
   if (showLobby) {
     return (
       <GameProvider>
-        <LobbyNew onSelectTable={(tableId) => setSelectedTableId(tableId)} />
+        <Lobby onSelectTable={(tableId) => setSelectedTableId(tableId)} />
       </GameProvider>
     );
   }
