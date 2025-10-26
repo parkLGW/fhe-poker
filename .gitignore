@@ -23,3 +23,11 @@ tmp
 coverage.json
 pnpm-lock.yaml
 yarn.lock
+
+# sensitive files
+*private_key*.txt
+*.key
+*.pem
+
+# development docs archive
+docs/archive
