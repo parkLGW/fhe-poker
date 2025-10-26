@@ -209,7 +209,13 @@ export function Lobby({ onSelectTable }: LobbyProps) {
   );
 }
 
-function TableCard({ tableId, info, onSelect }: any) {
+interface TableCardProps {
+  tableId: number;
+  info: any[];
+  onSelect: (tableId: number) => void;
+}
+
+function TableCard({ tableId, info, onSelect }: TableCardProps) {
   const { t } = useTranslation();
   const { address } = useAccount();
   const fhevm = useFHEVM();
