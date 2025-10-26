@@ -866,8 +866,8 @@ export function Game({ tableId, onBack }: GameProps) {
           {/* Showdown 阶段 - 公开手牌 */}
           {gameState === 5 && decryptedCards.card1 !== null && decryptedCards.card2 !== null && !hasRevealedCards && (
             <div className="mb-6 p-6 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-xl shadow-xl border-2 border-purple-400">
-              <h4 className="text-2xl font-bold text-white mb-3 text-center">🎴 摊牌阶段</h4>
-              <p className="text-purple-100 mb-4 text-center">请公开你的手牌以参与比牌</p>
+              <h4 className="text-2xl font-bold text-white mb-3 text-center">🎴 {t('game.showdown_phase')}</h4>
+              <p className="text-purple-100 mb-4 text-center">{t('game.reveal_cards_desc')}</p>
               <button
                 onClick={async () => {
                   try {
@@ -886,7 +886,7 @@ export function Game({ tableId, onBack }: GameProps) {
                 disabled={actionInProgress}
                 className="w-full bg-white hover:bg-gray-100 disabled:bg-gray-400 text-purple-600 font-bold py-4 px-6 rounded-xl shadow-lg transform hover:scale-105 transition-all"
               >
-                {actionInProgress ? '⏳ 公开中...' : '🃏 公开手牌'}
+                {actionInProgress ? `⏳ ${t('game.revealing')}` : `🃏 ${t('game.reveal_cards')}`}
               </button>
             </div>
           )}
@@ -894,8 +894,8 @@ export function Game({ tableId, onBack }: GameProps) {
           {/* Showdown 阶段 - 已公开手牌提示 */}
           {gameState === 5 && hasRevealedCards && (
             <div className="mb-6 p-6 bg-gradient-to-r from-green-600 to-emerald-600 rounded-xl shadow-xl border-2 border-green-400">
-              <h4 className="text-2xl font-bold text-white mb-2 text-center">✅ 手牌已公开</h4>
-              <p className="text-green-100 text-center">等待其他玩家公开手牌...</p>
+              <h4 className="text-2xl font-bold text-white mb-2 text-center">✅ {t('game.cards_revealed')}</h4>
+              <p className="text-green-100 text-center">{t('game.waiting_others_reveal')}</p>
             </div>
           )}
 

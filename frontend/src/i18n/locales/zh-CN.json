@@ -132,7 +132,10 @@
     "winner": "获胜者",
     "showdown_phase": "摊牌阶段",
     "reveal_cards": "公开手牌",
-    "reveal_cards_desc": "请公开你的手牌以参与比牌"
+    "reveal_cards_desc": "请公开你的手牌以参与比牌",
+    "revealing": "公开中...",
+    "cards_revealed": "手牌已公开",
+    "waiting_others_reveal": "等待其他玩家公开手牌..."
   },
   "errors": {
     "wallet_not_connected": "请先连接钱包",

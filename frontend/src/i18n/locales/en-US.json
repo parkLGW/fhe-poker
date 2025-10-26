@@ -132,7 +132,10 @@
     "winner": "Winner",
     "showdown_phase": "Showdown Phase",
     "reveal_cards": "Reveal Cards",
-    "reveal_cards_desc": "Please reveal your cards to participate in showdown"
+    "reveal_cards_desc": "Please reveal your cards to participate in showdown",
+    "revealing": "Revealing...",
+    "cards_revealed": "Cards Revealed",
+    "waiting_others_reveal": "Waiting for other players to reveal..."
   },
   "errors": {
     "wallet_not_connected": "Please connect wallet first",
