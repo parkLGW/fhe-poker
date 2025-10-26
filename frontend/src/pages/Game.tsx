@@ -12,6 +12,21 @@ import { useGameStore } from '../store/gameStore.tsx';
 import { POKER_TABLE_ADDRESS } from '../lib/contract';
 import { LanguageSwitcher } from '../components/layout/LanguageSwitcher';
 
+// 添加脉冲动画样式
+const pulseAnimation = `
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0px rgba(46, 139, 87, 0.5); }
+  100% { box-shadow: 0 0 0 10px rgba(46, 139, 87, 0); }
+}
+`;
+
+// 注入样式
+if (typeof document !== 'undefined') {
+  const style = document.createElement('style');
+  style.textContent = pulseAnimation;
+  document.head.appendChild(style);
+}
+
 interface GameProps {
   tableId: number;
   onBack: () => void;
@@ -21,30 +36,51 @@ interface GameProps {
 const SUITS = ['♠', '♥', '♦', '♣'];
 const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
 
-// 判断花色颜色
-function getSuitColor(suit: string): string {
-  return suit === '♥' || suit === '♦' ? 'text-red-600' : 'text-gray-900';
-}
-
-// 扑克牌组件 - 支持不同尺寸
-function PokerCard({ card, isHidden = false, size = 'normal' }: { card?: number | null; isHidden?: boolean; size?: 'normal' | 'large' }) {
-  // 根据尺寸设置不同的样式 - 使用内联样式确保生效
+// 扑克牌组件 - 支持不同尺寸和未知牌
+function PokerCard({ card, isHidden = false, size = 'normal', unknown = false }: { card?: number | null; isHidden?: boolean; size?: 'normal' | 'large'; unknown?: boolean }) {
+  // 根据尺寸设置不同的样式 - 参考 demo.html 使用 80px x 112px
   const sizeStyle = size === 'large'
-    ? { width: '6rem', height: '9rem' }    // 大尺寸：96px x 144px
-    : { width: '4rem', height: '6rem' };   // 普通尺寸：64px x 96px (w-16 h-24)
+    ? { width: '6rem', height: '8.4rem' }    // 大尺寸：96px x 134px
+    : { width: '5rem', height: '7rem' };     // 普通尺寸：80px x 112px
 
   const textSizes = size === 'large'
     ? { corner: 'text-sm', suit: 'text-xl', center: 'text-5xl', back: 'text-4xl' }
-    : { corner: 'text-[0.5rem]', suit: 'text-xs', center: 'text-2xl', back: 'text-2xl' };
+    : { corner: 'text-[0.5rem]', suit: 'text-xs', center: 'text-3xl', back: 'text-3xl' };
 
+  // 未知牌（公共牌未翻开）- 严格参考 demo.html 的设计
+  if (unknown) {
+    return (
+      <div
+        style={{
+          ...sizeStyle,
+          background: 'white',
+          boxShadow: '0 6px 12px rgba(0,0,0,0.3)',
+          borderRadius: '8px'
+        }}
+        className="border border-white/15 flex items-center justify-center opacity-30"
+      >
+        <span className="text-black font-bold text-3xl">?</span>
+      </div>
+    );
+  }
+
+  // 牌背（玩家手牌未翻开）
   if (isHidden || card === null || card === undefined) {
     return (
-      <div style={sizeStyle} className="relative bg-gradient-to-br from-blue-600 to-blue-800 rounded-lg border-2 border-blue-900 shadow-lg transform hover:scale-105 transition-transform">
+      <div
+        style={{
+          ...sizeStyle,
+          background: 'white',
+          boxShadow: '0 6px 12px rgba(0,0,0,0.3)',
+          borderRadius: '8px'
+        }}
+        className="relative border border-white/15 transform hover:scale-105 transition-transform"
+      >
         <div className="absolute inset-0 opacity-20">
-          <div className="w-full h-full bg-[repeating-linear-gradient(45deg,transparent,transparent_3px,rgba(255,255,255,0.1)_3px,rgba(255,255,255,0.1)_6px)]" />
+          <div className="w-full h-full bg-[repeating-linear-gradient(45deg,transparent,transparent_3px,rgba(0,0,0,0.1)_3px,rgba(0,0,0,0.1)_6px)]" />
         </div>
         <div className="absolute inset-0 flex items-center justify-center">
-          <div className={`${textSizes.back} text-white opacity-50`}>🂠</div>
+          <div className={`${textSizes.back} text-gray-400 opacity-50`}>🂠</div>
         </div>
       </div>
     );
@@ -55,13 +91,24 @@ function PokerCard({ card, isHidden = false, size = 'normal' }: { card?: number 
   const cardIndex = numIndex - 1;
   const suit = SUITS[Math.floor(cardIndex / 13)];
   const rank = RANKS[cardIndex % 13];
-  const colorClass = getSuitColor(suit);
+  // 红心和方片是红色，黑桃和梅花是黑色
+  const isRed = suit === '♥' || suit === '♦';
+  const textColor = isRed ? '#dc2626' : '#1f2937';
 
-  // 简化设计：只在中间显示点数和花色
+  // 简化设计：只在中间显示点数和花色 - 严格参考 demo.html
   return (
-    <div style={sizeStyle} className={`bg-white rounded-lg border-2 border-gray-300 shadow-lg transform hover:scale-105 transition-transform flex flex-col items-center justify-center ${colorClass}`}>
-      <div className="text-lg font-bold leading-tight">{rank}</div>
-      <div className="text-2xl leading-tight">{suit}</div>
+    <div
+      style={{
+        ...sizeStyle,
+        background: 'white',
+        boxShadow: '0 6px 12px rgba(0,0,0,0.3)',
+        borderRadius: '8px',
+        border: '1px solid rgba(255, 255, 255, 0.15)'
+      }}
+      className="flex flex-col items-center justify-center"
+    >
+      <div className="text-lg font-bold leading-tight" style={{ color: textColor }}>{rank}</div>
+      <div className="text-2xl leading-tight" style={{ color: textColor }}>{suit}</div>
     </div>
   );
 }
@@ -484,19 +531,6 @@ export function Game({ tableId, onBack }: GameProps) {
   const bigBlind = state.tableInfo ? Number(state.tableInfo[9]) : 0;
   const pot = playersInfo ? Number(playersInfo.pot) : 0;
 
-  const getStateName = (state: number): string => {
-    const stateKeys: { [key: number]: string } = {
-      0: 'game.states.waiting',
-      1: 'game.states.preflop',
-      2: 'game.states.flop',
-      3: 'game.states.turn',
-      4: 'game.states.river',
-      5: 'game.states.showdown',
-      6: 'game.states.ended'
-    };
-    return t(stateKeys[state] || 'game.states.waiting');
-  };
-
   // 加载状态
   if (state.isLoading && !state.tableInfo) {
     return (
@@ -511,26 +545,14 @@ export function Game({ tableId, onBack }: GameProps) {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-800 via-slate-900 to-black p-4">
+    <div className="min-h-screen p-4" style={{ background: 'linear-gradient(135deg, #0d2818 0%, #1a472a 50%, #0a5f38 100%)' }}>
       <div className="max-w-7xl mx-auto">
-        {/* 头部信息栏 */}
+        {/* 头部信息栏 - 只保留桌号 */}
         <div className="bg-gradient-to-r from-slate-800 to-slate-700 rounded-xl shadow-2xl p-4 mb-4 border border-slate-600">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <div className="bg-yellow-500 text-black font-bold px-4 py-2 rounded-lg shadow-lg">
+              <div className="font-bold px-4 py-2 rounded-lg shadow-lg" style={{ color: 'white' }}>
                 {t('game.table_number', { number: tableId })}
-              </div>
-              <div className="text-white">
-                <div className="text-sm text-slate-300">{t('game.game_state')}</div>
-                <div className="font-bold text-lg">{getStateName(gameState)}</div>
-              </div>
-              <div className="text-white">
-                <div className="text-sm text-slate-300">{t('lobby.players')}</div>
-                <div className="font-bold text-lg">{playerCount}/6</div>
-              </div>
-              <div className="text-white">
-                <div className="text-sm text-slate-300">{t('lobby.blinds')}</div>
-                <div className="font-bold text-lg">{smallBlind}/{bigBlind}</div>
               </div>
             </div>
             <div className="flex items-center gap-4">
@@ -546,166 +568,204 @@ export function Game({ tableId, onBack }: GameProps) {
           </div>
         </div>
 
-        {/* 扑克桌主区域 */}
-        <div className="relative">
-          {/* 扑克桌 */}
-          <div className="relative bg-gradient-to-br from-green-700 via-green-800 to-green-900 rounded-[50%] shadow-2xl border-8 border-amber-900 p-12 mx-auto" style={{ maxWidth: '900px', aspectRatio: '16/10' }}>
-            {/* 桌面内边框 */}
-            <div className="absolute inset-8 border-4 border-amber-700 rounded-[50%] opacity-50"></div>
+        {/* 扑克桌主区域 - 使用绝对定位，参考 demo.html */}
+        <div className="relative h-[700px] overflow-hidden">
+          {/* 牌桌 - 椭圆形，居中 */}
+          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"
+               style={{ width: '800px', height: '400px' }}>
+            <div style={{
+              position: 'absolute',
+              width: '100%',
+              height: '100%',
+              borderRadius: '50%',
+              border: '8px solid #000',
+              background: '#0d6832',
+              boxShadow: '0 10px 30px rgba(0,0,0,0.5), inset 0 0 60px rgba(0,0,0,0.3)'
+            }}></div>
 
-            {/* 奖池区域 */}
-            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center">
-              <div className="bg-black bg-opacity-40 backdrop-blur-sm rounded-xl px-6 py-3 border-2 border-yellow-500 shadow-xl">
-                <div className="text-yellow-400 text-sm font-semibold mb-1">💰 {t('game.pot')}</div>
-                <div className="text-white text-2xl font-bold">{pot}</div>
+            {/* 中央游戏区 - 奖池和公共牌 */}
+            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-10">
+              {/* 奖池信息面板 - 圆角矩形卡片 */}
+              <div className="backdrop-blur-md py-2.5 px-4 border-2 border-white/30 mb-4 shadow-xl"
+                   style={{
+                     background: 'rgba(58, 107, 198, 0.3)',
+                     width: '360px',
+                     borderRadius: '32px'
+                   }}>
+                <div className="flex justify-between items-center">
+                  <div className="flex flex-col items-center justify-center px-2 flex-1">
+                    <p className="text-xs text-white mb-1">{t('game.pot')}</p>
+                    <p className="text-lg font-bold" style={{
+                      background: 'linear-gradient(to right, #ecc94b, #d4af37)',
+                      WebkitBackgroundClip: 'text',
+                      WebkitTextFillColor: 'transparent'
+                    }}>{pot}</p>
+                  </div>
+                  <div className="flex flex-col items-center justify-center px-2 border-l border-r border-white/30 flex-1">
+                    <p className="text-xs text-white mb-1">{t('lobby.blinds')}</p>
+                    <p className="text-sm font-bold text-white">{smallBlind}/{bigBlind}</p>
+                  </div>
+                  <div className="flex flex-col items-center justify-center px-2 flex-1">
+                    <p className="text-xs text-white mb-1">{t('lobby.players')}</p>
+                    <p className="text-sm font-bold text-white">{playerCount}/6</p>
+                  </div>
+                </div>
               </div>
-            </div>
 
-            {/* 公共牌区域 - 使用普通尺寸卡牌 (w-16 h-24) */}
-            <div className="absolute top-1/3 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-              <div className="flex gap-3 justify-center">
+              {/* 公共牌区域 - 参考 demo.html 的圆角容器 */}
+              <div className="flex justify-center space-x-3"
+                   style={{
+                     background: 'rgba(13, 104, 50, 0.8)',
+                     padding: '12px 20px',
+                     borderRadius: '100px',
+                     border: '2px solid rgba(0,0,0,0.3)',
+                     boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+                   }}>
                 {[0, 1, 2, 3, 4].map((idx) => {
                   const card = state.communityCards?.[idx];
                   const isRevealed = card !== undefined && card !== null && Number(card) !== 0;
+                  const rotations = [-2, 1, -1, 2, -3]; // 轻微旋转效果
                   return (
-                    <PokerCard key={idx} card={isRevealed ? card : null} isHidden={!isRevealed} />
+                    <div key={idx} style={{ transform: `rotate(${rotations[idx]}deg)` }}>
+                      {isRevealed ? (
+                        <PokerCard card={Number(card)} />
+                      ) : (
+                        <PokerCard card={0} unknown={true} />
+                      )}
+                    </div>
                   );
                 })}
               </div>
             </div>
+          </div>
 
-            {/* 玩家座位 - 环绕桌子 */}
-            {playersInfo && (() => {
+          {/* 玩家座位 - 在牌桌外面，参考 demo.html 的布局 */}
+          {playersInfo && (() => {
               const players = playersInfo.players || [];
               const playerBets = playersInfo.playerBets || [];
               const playerFolded = playersInfo.playerFolded || [];
               const currentPlayerIndex = playersInfo.currentPlayerIndex;
               const dealerIndex = playersInfo.dealerIndex;
 
-              // 座位位置配置 (6个座位环绕桌子)
+              // 座位位置配置 (6个座位环绕桌子) - 紧贴桌子边缘
+              // 位置顺序：底部中间(0) -> 左下(1) -> 左上(2) -> 顶部中间(3) -> 右上(4) -> 右下(5)
               const seatPositions = [
-                { top: '85%', left: '50%', transform: 'translate(-50%, -50%)' }, // 底部中间 (玩家自己)
-                { top: '70%', left: '10%', transform: 'translate(-50%, -50%)' }, // 左下
-                { top: '35%', left: '5%', transform: 'translate(-50%, -50%)' },  // 左上
-                { top: '10%', left: '50%', transform: 'translate(-50%, -50%)' }, // 顶部中间
-                { top: '35%', left: '95%', transform: 'translate(-50%, -50%)' }, // 右上
-                { top: '70%', left: '90%', transform: 'translate(-50%, -50%)' }, // 右下
+                { bottom: '60px', left: '50%', transform: 'translateX(-50%)' },   // 0: 底部中间 (当前玩家)
+                { bottom: '180px', left: '140px' },                                // 1: 左下
+                { top: '35%', left: '120px', transform: 'translateY(-50%)' },     // 2: 左上
+                { top: '40px', left: '50%', transform: 'translateX(-50%)' },      // 3: 顶部中间
+                { top: '35%', right: '120px', transform: 'translateY(-50%)' },    // 4: 右上
+                { bottom: '180px', right: '140px' },                               // 5: 右下
               ];
 
-              return seatPositions.map((pos, idx) => {
-                const player = players[idx];
+              // 为每个玩家生成随机纯色（基于地址）
+              const getPlayerColor = (playerAddress: string) => {
+                const colors = [
+                  '#3b82f6', // 蓝
+                  '#10b981', // 绿
+                  '#f59e0b', // 橙
+                  '#ef4444', // 红
+                  '#8b5cf6', // 紫
+                  '#06b6d4', // 青
+                ];
+                const hash = playerAddress.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+                return colors[hash % colors.length];
+              };
+
+              // 找到当前玩家的索引
+              const myActualIndex = players.findIndex(p => address && p && p.toLowerCase() === address.toLowerCase());
+
+              return seatPositions.map((pos, displayIdx) => {
+                // 计算实际玩家索引：将当前玩家映射到底部中间位置
+                const actualIdx = myActualIndex >= 0 ? (displayIdx + myActualIndex) % 6 : displayIdx;
+
+                const player = players[actualIdx];
                 const isOccupied = player && player !== '0x0000000000000000000000000000000000000000';
-                const isCurrentPlayer = idx === currentPlayerIndex;
-                const isDealer = idx === dealerIndex;
-                const isFolded = playerFolded[idx];
-                const bet = playerBets[idx] ? Number(playerBets[idx]) : 0;
+                const isCurrentPlayer = actualIdx === currentPlayerIndex;
+                const isDealer = actualIdx === dealerIndex;
+                const isFolded = playerFolded[actualIdx];
+                const bet = playerBets[actualIdx] ? Number(playerBets[actualIdx]) : 0;
                 const isMe = address && player && player.toLowerCase() === address.toLowerCase();
 
                 return (
                   <div
-                    key={idx}
+                    key={displayIdx}
                     className="absolute"
                     style={pos}
                   >
                     {isOccupied ? (
                       <div className="relative">
-                        {/* 当前玩家的发光效果 */}
-                        {isCurrentPlayer && (
-                          <div className="absolute -inset-2 bg-yellow-400 rounded-lg opacity-50 blur-md animate-pulse"></div>
-                        )}
+                        {/* 玩家信息卡片 - 纯色背景的圆角矩形 */}
+                        {(() => {
+                          const playerColor = getPlayerColor(player);
+                          return (
+                            <div
+                              className={`p-3 min-w-[140px] ${
+                                isCurrentPlayer ? 'shadow-[0_0_20px_rgba(212,175,55,0.6)]' : 'shadow-lg'
+                              }`}
+                              style={{
+                                backgroundColor: playerColor,
+                                border: isCurrentPlayer ? '3px solid #d4af37' : '3px solid rgba(255, 255, 255, 0.3)',
+                                borderRadius: '32px'
+                              }}
+                            >
+                              <div className="flex flex-col items-center">
+                                {/* 头像 - 圆角矩形 */}
+                                <div className="overflow-hidden bg-white/20 p-2" style={{ borderRadius: '20px' }}>
+                                  <div className="w-12 h-12 bg-white/30 flex items-center justify-center backdrop-blur-sm" style={{ borderRadius: '16px' }}>
+                                    <span className="text-white font-bold text-2xl drop-shadow-lg">
+                                      {isMe ? '👤' : '👨'}
+                                    </span>
+                                  </div>
+                                </div>
 
-                        {/* 玩家信息卡片 */}
-                        <div className={`relative bg-gradient-to-br ${isMe ? 'from-blue-600 to-blue-800' : 'from-slate-700 to-slate-800'} rounded-lg shadow-xl border-4 ${isCurrentPlayer ? 'border-yellow-400 shadow-yellow-400/50' : 'border-slate-600'} min-w-32 transition-all duration-300 p-3`}>
-                          {/* 当前玩家指示器 - 放在卡片内部顶部 */}
-                          {isCurrentPlayer && (
-                            <div className="mb-2 bg-yellow-400 text-xs font-bold px-3 py-1 rounded-full shadow-lg whitespace-nowrap text-center" style={{ color: '#00ff00' }}>
-                              ⏰ {t('game.player_status.in_action')}
-                            </div>
-                          )}
+                                {/* 玩家名称 */}
+                                <p className="text-sm text-center mt-2 font-bold drop-shadow-md" style={{ color: 'white' }}>
+                                  {isMe ? t('game.player_status.you') : `${player.slice(0, 6)}...${player.slice(-4)}`}
+                                </p>
 
-                          {/* 玩家地址 */}
-                          <div className={`!text-white text-xs font-mono mb-2 ${isCurrentPlayer ? 'font-bold' : ''}`} style={{ color: '#ffffff' }}>
-                            {isMe ? `👤 ${t('game.player_status.you')}` : `${player.slice(0, 6)}...${player.slice(-4)}`}
-                          </div>
+                                {/* 庄家标记 - 移到卡片内部 */}
+                                {isDealer && (
+                                  <div className="mt-1 text-xs font-bold flex items-center gap-1" style={{ color: '#000' }}>
+                                    🎯 {t('game.dealer')}
+                                  </div>
+                                )}
 
-                          {/* 状态 */}
-                          <div className="flex items-center justify-between">
-                            <div className={`text-xs font-semibold !text-white`} style={{ color: '#ffffff' }}>
-                              {isFolded ? t('game.player_status.folded') : t('game.player_status.active')}
-                            </div>
-                            {bet > 0 && (
-                              <div className="bg-yellow-500 text-black text-xs font-bold px-2 py-0.5 rounded">
-                                {bet}
+                                {/* 筹码显示 - 只在有下注时显示 */}
+                                {bet > 0 && (
+                                  <div className="flex mt-2">
+                                    <div className="px-3 py-1 rounded-full flex items-center justify-center font-bold text-sm shadow-lg bg-black/30 backdrop-blur-sm">
+                                      <span className="text-yellow-300">{bet}</span>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* 状态指示 */}
+                                {isFolded && (
+                                  <div className="mt-2 text-xs text-red-300 font-bold bg-black/30 px-2 py-1 rounded-full">
+                                    {t('game.player_status.folded')}
+                                  </div>
+                                )}
+                                {isCurrentPlayer && !isFolded && (
+                                  <div className="mt-2 text-xs text-yellow-300 font-bold bg-black/30 px-2 py-1 rounded-full flex items-center gap-1">
+                                    ⏰ {t('game.player_status.in_action')}
+                                  </div>
+                                )}
                               </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* 庄家标记 - 放在卡片外部下方 */}
-                        {isDealer && (
-                          <div className="absolute top-full mt-1 left-1/2 -translate-x-1/2 bg-yellow-500 text-black text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center shadow-lg z-10">
-                            D
-                          </div>
-                        )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     ) : (
-                      <div className="bg-slate-800 bg-opacity-50 rounded-lg p-3 border-2 border-dashed border-slate-600 min-w-32">
-                        <div className="!text-white text-xs text-center" style={{ color: '#ffffff' }}>{t('game.empty_seat')}</div>
+                      <div className="bg-[#242c47]/50 p-4 border-2 border-dashed border-white/20 min-w-[140px]" style={{ borderRadius: '32px' }}>
+                        <div className="text-sm text-center" style={{ color: 'white' }}>{t('game.empty_seat')}</div>
                       </div>
                     )}
                   </div>
                 );
               });
             })()}
-          </div>
 
-          {/* 你的手牌 - 显示在桌子下方，使用普通尺寸卡牌 (w-16 h-24) */}
-          <div className="mt-6 flex justify-center">
-            <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-6 shadow-2xl border-2 border-slate-600">
-              <div className="text-white text-lg font-semibold mb-4 text-center">🎴 {t('game.your_hand')}</div>
-              <div className="flex gap-6 justify-center">
-                {gameState === 0 ? (
-                  // 游戏未开始，显示牌背
-                  <>
-                    <PokerCard isHidden />
-                    <PokerCard isHidden />
-                  </>
-                ) : decryptedCards.card1 !== null && decryptedCards.card2 !== null ? (
-                  // 已解密，显示明牌
-                  <>
-                    <PokerCard card={decryptedCards.card1} />
-                    <PokerCard card={decryptedCards.card2} />
-                  </>
-                ) : isDecrypting ? (
-                  // 解密中
-                  <>
-                    <div className="w-16 h-24 bg-slate-700 rounded-lg flex items-center justify-center animate-pulse">
-                      <div className="text-white text-xs">{t('game.decrypting')}</div>
-                    </div>
-                    <div className="w-16 h-24 bg-slate-700 rounded-lg flex items-center justify-center animate-pulse">
-                      <div className="text-white text-xs">{t('game.decrypting')}</div>
-                    </div>
-                  </>
-                ) : state.playerCards ? (
-                  // 有加密手牌，显示牌背
-                  <>
-                    <PokerCard isHidden />
-                    <PokerCard isHidden />
-                  </>
-                ) : (
-                  // 其他情况（不应该出现）
-                  <>
-                    <div className="w-16 h-24 bg-slate-700 rounded-lg flex items-center justify-center">
-                      <div className="text-slate-500 text-xs">{t('game.waiting')}</div>
-                    </div>
-                    <div className="w-16 h-24 bg-slate-700 rounded-lg flex items-center justify-center">
-                      <div className="text-slate-500 text-xs">{t('game.waiting')}</div>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* 错误提示 */}
@@ -840,6 +900,55 @@ export function Game({ tableId, onBack }: GameProps) {
           )}
 
           {/* 轮流提示 */}
+          {/* 你的手牌 - 显示在最上方 */}
+          <div className="mb-6 flex justify-center">
+            <div className="bg-[#242c47] backdrop-blur-sm rounded-2xl p-6 shadow-2xl border border-white/5">
+              <div className="text-[#e8e8e8] text-lg font-semibold mb-4 text-center">🎴 {t('game.your_hand')}</div>
+              <div className="flex gap-4 justify-center">
+                {gameState === 0 ? (
+                  // 游戏未开始，显示牌背
+                  <>
+                    <PokerCard isHidden />
+                    <PokerCard isHidden />
+                  </>
+                ) : decryptedCards.card1 !== null && decryptedCards.card2 !== null ? (
+                  // 已解密，显示明牌
+                  <>
+                    <PokerCard card={decryptedCards.card1} />
+                    <PokerCard card={decryptedCards.card2} />
+                  </>
+                ) : isDecrypting ? (
+                  // 解密中
+                  <>
+                    <div className="w-16 h-24 bg-white rounded-lg flex items-center justify-center animate-pulse shadow-lg">
+                      <div className="text-gray-500 text-xs">{t('game.decrypting')}</div>
+                    </div>
+                    <div className="w-16 h-24 bg-white rounded-lg flex items-center justify-center animate-pulse shadow-lg">
+                      <div className="text-gray-500 text-xs">{t('game.decrypting')}</div>
+                    </div>
+                  </>
+                ) : state.playerCards ? (
+                  // 有加密手牌，显示牌背
+                  <>
+                    <PokerCard isHidden />
+                    <PokerCard isHidden />
+                  </>
+                ) : (
+                  // 其他情况（不应该出现）
+                  <>
+                    <div className="w-16 h-24 bg-white rounded-lg flex items-center justify-center shadow-lg">
+                      <div className="text-gray-400 text-xs">{t('game.waiting')}</div>
+                    </div>
+                    <div className="w-16 h-24 bg-white rounded-lg flex items-center justify-center shadow-lg">
+                      <div className="text-gray-400 text-xs">{t('game.waiting')}</div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* 轮到你了提示 */}
           {myPlayerIndex !== null && state.tableInfo && gameState !== 0 && gameState !== 5 && gameState !== 6 && (
             <div className="mb-6">
               {(() => {
@@ -857,56 +966,112 @@ export function Game({ tableId, onBack }: GameProps) {
             </div>
           )}
 
-          {/* 游戏操作按钮 - 仅在非 Showdown 和非 Finished 阶段显示 */}
+          {/* 游戏操作按钮 - 严格参考 demo.html 的设计 */}
           {gameState !== 5 && gameState !== 6 && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {(() => {
-                const currentPlayerIndex = state.tableInfo ? Number(state.tableInfo[3]) : null;
-                const isMyTurn = myPlayerIndex !== null && currentPlayerIndex !== null && myPlayerIndex === currentPlayerIndex;
-                // 当游戏未开始或玩家数量不足时，禁用所有按钮
-                const isDisabled = actionInProgress || state.isLoading || !isMyTurn || gameState === 0 || playerCount < 2;
+            <div className="flex justify-center px-8">
+              <div className="flex justify-between w-full max-w-[800px]">
+                {(() => {
+                  const currentPlayerIndex = state.tableInfo ? Number(state.tableInfo[3]) : null;
+                  const isMyTurn = myPlayerIndex !== null && currentPlayerIndex !== null && myPlayerIndex === currentPlayerIndex;
+                  // 当游戏未开始或玩家数量不足时，禁用所有按钮
+                  const isDisabled = actionInProgress || state.isLoading || !isMyTurn || gameState === 0 || playerCount < 2;
+                  const currentBet = state.tableInfo ? Number(state.tableInfo[4]) : 0;
 
-                return (
-                  <>
-                  <button
-                    onClick={handleCheck}
-                    disabled={isDisabled}
-                    className="bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 disabled:from-gray-500 disabled:to-gray-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg transform hover:scale-105 disabled:scale-100 transition-all border-2 border-blue-400 disabled:border-gray-500"
-                    title={!isMyTurn ? t('game.not_your_turn') : ''}
-                  >
-                    <div className="text-2xl mb-1">✋</div>
-                    <div>{actionInProgress ? t('game.processing') : t('game.actions.check')}</div>
-                  </button>
-                  <button
-                    onClick={handleCall}
-                    disabled={isDisabled}
-                    className="bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 disabled:from-gray-500 disabled:to-gray-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg transform hover:scale-105 disabled:scale-100 transition-all border-2 border-green-400 disabled:border-gray-500"
-                    title={!isMyTurn ? t('game.not_your_turn') : ''}
-                  >
-                    <div className="text-2xl mb-1">💰</div>
-                    <div>{actionInProgress ? t('game.processing') : t('game.actions.call')}</div>
-                  </button>
-                  <button
-                    onClick={handleBet}
-                    disabled={isDisabled}
-                    className="bg-gradient-to-br from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700 disabled:from-gray-500 disabled:to-gray-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg transform hover:scale-105 disabled:scale-100 transition-all border-2 border-yellow-400 disabled:border-gray-500"
-                    title={!isMyTurn ? t('game.not_your_turn') : ''}
-                  >
-                    <div className="text-2xl mb-1">📈</div>
-                    <div>{actionInProgress ? t('game.processing') : t('game.actions.raise')}</div>
-                  </button>
-                  <button
-                    onClick={handleFold}
-                    disabled={isDisabled}
-                    className="bg-gradient-to-br from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 disabled:from-gray-500 disabled:to-gray-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg transform hover:scale-105 disabled:scale-100 transition-all border-2 border-red-400 disabled:border-gray-500"
-                    title={!isMyTurn ? t('game.not_your_turn') : ''}
-                  >
-                    <div className="text-2xl mb-1">🚫</div>
-                    <div>{actionInProgress ? t('game.processing') : t('game.actions.fold')}</div>
-                  </button>
-                </>
-              );
-            })()}
+                  return (
+                    <>
+                      {/* 弃牌按钮 - 严格参考 demo.html，始终显示彩色 */}
+                      <button
+                        onClick={handleFold}
+                        disabled={isDisabled}
+                        style={{
+                          width: '150px',
+                          height: '64px',
+                          background: '#c53030',
+                          borderRadius: '12px',
+                          opacity: isDisabled ? 0.5 : 1,
+                          cursor: isDisabled ? 'not-allowed' : 'pointer'
+                        }}
+                        className="flex flex-col items-center justify-center transition-all hover:bg-[#d34343]"
+                        title={!isMyTurn ? t('game.not_your_turn') : ''}
+                      >
+                        <span className="text-[#e8e8e8] font-semibold text-lg">
+                          {actionInProgress ? t('game.processing') : t('game.actions.fold')}
+                        </span>
+                      </button>
+
+                      {/* 过牌按钮 - 严格参考 demo.html，始终显示彩色 */}
+                      <button
+                        onClick={handleCheck}
+                        disabled={isDisabled}
+                        style={{
+                          width: '150px',
+                          height: '64px',
+                          background: '#2d3757',
+                          borderRadius: '12px',
+                          opacity: isDisabled ? 0.5 : 1,
+                          cursor: isDisabled ? 'not-allowed' : 'pointer'
+                        }}
+                        className="flex flex-col items-center justify-center transition-all hover:bg-[#3a4670]"
+                        title={!isMyTurn ? t('game.not_your_turn') : ''}
+                      >
+                        <span className="text-[#e8e8e8] font-semibold text-lg">
+                          {actionInProgress ? t('game.processing') : t('game.actions.check')}
+                        </span>
+                      </button>
+
+                      {/* 跟注按钮 - 带脉冲动画，严格参考 demo.html */}
+                      <button
+                        onClick={handleCall}
+                        disabled={isDisabled}
+                        style={{
+                          width: '180px',
+                          height: '64px',
+                          background: '#2e8b57',
+                          borderRadius: '12px',
+                          opacity: isDisabled ? 0.5 : 1,
+                          cursor: isDisabled ? 'not-allowed' : 'pointer',
+                          animation: isMyTurn && !isDisabled ? 'pulse 1.5s infinite' : 'none'
+                        }}
+                        className="flex flex-col items-center justify-center transition-all hover:bg-[#369a64]"
+                        title={!isMyTurn ? t('game.not_your_turn') : ''}
+                      >
+                        <span className="text-[#e8e8e8] font-semibold text-lg">
+                          {actionInProgress ? t('game.processing') : t('game.actions.call')}
+                        </span>
+                        {currentBet > 0 && (
+                          <span className="text-sm" style={{
+                            background: 'linear-gradient(to right, #ecc94b, #d4af37)',
+                            WebkitBackgroundClip: 'text',
+                            WebkitTextFillColor: 'transparent'
+                          }}>
+                            {currentBet}
+                          </span>
+                        )}
+                      </button>
+
+                      {/* 加注按钮 - 金色渐变，严格参考 demo.html */}
+                      <button
+                        onClick={handleBet}
+                        disabled={isDisabled}
+                        style={{
+                          width: '150px',
+                          height: '64px',
+                          background: 'linear-gradient(to right, #d4af37, #c19b30)',
+                          borderRadius: '12px',
+                          opacity: isDisabled ? 0.5 : 1,
+                          cursor: isDisabled ? 'not-allowed' : 'pointer'
+                        }}
+                        className="flex flex-col items-center justify-center transition-all hover:opacity-90"
+                        title={!isMyTurn ? t('game.not_your_turn') : ''}
+                      >
+                        <span className="text-black font-semibold text-lg">
+                          {actionInProgress ? t('game.processing') : t('game.actions.raise')}
+                        </span>
+                      </button>
+                    </>
+                  );
+                })()}
+              </div>
             </div>
           )}
         </div>
