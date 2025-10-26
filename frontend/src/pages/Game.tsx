@@ -187,6 +187,16 @@ export function Game({ tableId, onBack }: GameProps) {
         const tableInfo = await contractService.getTableInfo(tableId);
         setTableInfo(tableInfo);
 
+        // 🔍 调试日志：打印游戏状态和当前玩家
+        console.log('📊 游戏状态更新:', {
+          gameState: Number(tableInfo[0]),
+          playerCount: Number(tableInfo[1]),
+          activePlayers: Number(tableInfo[2]),
+          currentPlayerIndex: Number(tableInfo[3]),
+          dealerIndex: Number(tableInfo[4]),
+          timestamp: new Date().toISOString()
+        });
+
         // 加载游戏桌完整信息（包括玩家和奖池）
         try {
           const playersData = await contractService.getTableInfoWithPlayers(tableId);
@@ -199,6 +209,16 @@ export function Game({ tableId, onBack }: GameProps) {
         try {
           const playerIndex = await contractService.getPlayerIndex(tableId, playerAddress);
           setMyPlayerIndex(playerIndex);
+
+          // 🔍 调试日志：打印玩家索引和轮次判断
+          const currentPlayerIndex = Number(tableInfo[3]);
+          const isMyTurn = playerIndex === currentPlayerIndex;
+          console.log('👤 玩家轮次检查:', {
+            myPlayerIndex: playerIndex,
+            currentPlayerIndex: currentPlayerIndex,
+            isMyTurn: isMyTurn,
+            myAddress: playerAddress
+          });
         } catch (err) {
           console.error('❌ 无法获取玩家座位索引:', err);
           setError('无法获取玩家座位信息，请刷新页面重试');
@@ -400,10 +420,16 @@ export function Game({ tableId, onBack }: GameProps) {
         throw new Error('游戏已结束，请创建新游戏');
       }
 
+      console.log('✅ 玩家执行过牌操作，当前玩家索引:', Number(tableInfo[3]));
       await contractService.check(tableId);
+      console.log('✅ 过牌交易已确认');
       setError(null);
 
+      // 等待一小段时间确保区块链状态已更新
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       // 立即刷新游戏状态
+      console.log('🔄 立即刷新游戏状态...');
       await loadGameInfo();
     } catch (err) {
       const errorMsg = (err as Error).message;
@@ -431,10 +457,16 @@ export function Game({ tableId, onBack }: GameProps) {
         throw new Error('游戏已结束，请创建新游戏');
       }
 
+      console.log('✅ 玩家执行跟注操作，当前玩家索引:', Number(tableInfo[3]));
       await contractService.call(tableId);
+      console.log('✅ 跟注交易已确认');
       setError(null);
 
+      // 等待一小段时间确保区块链状态已更新
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       // 立即刷新游戏状态
+      console.log('🔄 立即刷新游戏状态...');
       await loadGameInfo();
     } catch (err) {
       const errorMsg = (err as Error).message;
@@ -484,6 +516,9 @@ export function Game({ tableId, onBack }: GameProps) {
 
       setError(null);
 
+      // 等待一小段时间确保区块链状态已更新
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       // 立即刷新游戏状态
       await loadGameInfo();
     } catch (err) {
@@ -512,6 +547,9 @@ export function Game({ tableId, onBack }: GameProps) {
 
       await contractService.fold(tableId);
       setError(null);
+
+      // 等待一小段时间确保区块链状态已更新
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       // 立即刷新游戏状态
       await loadGameInfo();
@@ -836,7 +874,7 @@ export function Game({ tableId, onBack }: GameProps) {
           {gameState === 0 && playerCount >= 2 && (
             <div className="mb-6 p-6 bg-gradient-to-r from-purple-600 to-purple-700 rounded-xl shadow-xl border-2 border-purple-400">
               {(() => {
-                const dealerIndex = state.tableInfo ? Number(state.tableInfo[5]) : null;
+                const dealerIndex = state.tableInfo ? Number(state.tableInfo[4]) : null; // ✅ 修复：dealerIndex 是索引 4
                 const isDealer = myPlayerIndex !== null && dealerIndex !== null && myPlayerIndex === dealerIndex;
 
                 if (isDealer) {
@@ -975,7 +1013,8 @@ export function Game({ tableId, onBack }: GameProps) {
                   const isMyTurn = myPlayerIndex !== null && currentPlayerIndex !== null && myPlayerIndex === currentPlayerIndex;
                   // 当游戏未开始或玩家数量不足时，禁用所有按钮
                   const isDisabled = actionInProgress || state.isLoading || !isMyTurn || gameState === 0 || playerCount < 2;
-                  const currentBet = state.tableInfo ? Number(state.tableInfo[4]) : 0;
+                  // TODO: currentBet 需要从其他地方获取，getTableInfo 不返回这个值
+                  const currentBet = 0; // 暂时设为 0
 
                   return (
                     <>
