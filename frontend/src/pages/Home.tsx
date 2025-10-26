@@ -29,7 +29,6 @@ export function Home() {
     }
   }, [isConnected, chainId]);
 
-  // 手动切换网络（通过 window.ethereum）
   const handleSwitchNetwork = async () => {
     if (!window.ethereum) {
       alert('未检测到钱包');
@@ -38,18 +37,16 @@ export function Home() {
 
     setSwitchingNetwork(true);
     try {
-      // 先尝试使用 wagmi 的 switchChain
       if (switchChain) {
         await switchChain({ chainId: SEPOLIA_CHAIN_ID });
       } else {
-        // 如果 wagmi 的 switchChain 不可用，直接使用 window.ethereum
+
         await window.ethereum.request({
           method: 'wallet_switchEthereumChain',
           params: [{ chainId: '0x' + SEPOLIA_CHAIN_ID.toString(16) }],
         });
       }
     } catch (error) {
-      // 如果网络不存在，尝试添加网络
       if ((error as { code?: number }).code === 4902) {
         try {
           await window.ethereum.request({
@@ -144,7 +141,12 @@ export function Home() {
 
             {/* 连接按钮 */}
             <div className="space-y-3">
-              {connectors.map((connector) => (
+              {connectors
+                .filter((connector) => {
+                  const allowedIds = ['metaMask', 'io.metamask', 'okx-wallet'];
+                  return allowedIds.includes(connector.id);
+                })
+                .map((connector) => (
                 <button
                   key={connector.id}
                   onClick={() => connect({ connector })}
