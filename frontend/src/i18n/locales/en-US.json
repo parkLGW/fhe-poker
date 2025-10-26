@@ -144,7 +144,15 @@
     "game_ended": "Game has ended",
     "not_your_turn": "Not your turn",
     "invalid_bet": "Invalid bet amount",
-    "insufficient_balance": "Insufficient balance"
+    "insufficient_balance": "Insufficient balance",
+    "fhevm_connection_error": "FHEVM Connection Error",
+    "fhevm_retry": "Retry Connection",
+    "fhevm_retrying": "Retrying...",
+    "relayer_unavailable": "Tip: Relayer service is temporarily unavailable, please retry later or refresh the page",
+    "contract_not_deployed": "Contract not deployed or network error",
+    "contract_error_hint": "Please ensure: 1) Connected to Sepolia testnet 2) Contract is properly deployed 3) Network connection is stable",
+    "wrong_network": "Wrong Network",
+    "switch_to_sepolia": "Switch to Sepolia"
   }
 }
 

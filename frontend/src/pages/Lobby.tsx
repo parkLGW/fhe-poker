@@ -17,7 +17,7 @@ interface LobbyProps {
 }
 
 export function Lobby({ onSelectTable }: LobbyProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const fhevm = useFHEVM();
   const { state, setLoading, setError } = useGameStore();
 
@@ -110,55 +110,160 @@ export function Lobby({ onSelectTable }: LobbyProps) {
           </div>
         </div>
 
-        {/* 创建表单 */}
-        {showCreateForm && (
-          <div className="bg-emerald-900/30 rounded-lg p-6 mb-8">
-            <h3 className="text-xl font-semibold text-white mb-4">{t('lobby.create_new_table')}</h3>
-            <div className="flex gap-4">
-              <div className="flex-1">
-                <label className="block text-emerald-300 mb-2">{t('lobby.small_blind')}</label>
-                <input
-                  type="number"
-                  value={smallBlind}
-                  onChange={(e) => setSmallBlind(e.target.value)}
-                  className="w-full bg-emerald-950 border border-emerald-700 rounded px-4 py-2 text-white"
-                  placeholder="10"
-                />
+        {/* 创建桌子弹窗 */}
+        {showCreateForm && createPortal(
+          <>
+            {/* 半透明遮罩层 */}
+            <div
+              style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                backdropFilter: 'blur(2px)',
+                zIndex: 9998
+              }}
+              onClick={() => !state.isLoading && setShowCreateForm(false)}
+            />
+
+            {/* 弹窗内容 */}
+            <div
+              style={{
+                position: 'fixed',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                zIndex: 9999,
+                maxWidth: '90vw',
+                width: '400px',
+                backgroundColor: '#047857',
+                boxSizing: 'border-box',
+                borderRadius: '20px',
+                overflow: 'hidden'
+              }}
+              className="shadow-2xl animate-scaleIn border-2 border-emerald-600"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ padding: '24px' }}>
+                <h3 className="text-xl font-bold text-white mb-5 text-center">
+                  🎰 {t('lobby.create_new_table')}
+                </h3>
+
+                <div className="mb-4" style={{ boxSizing: 'border-box' }}>
+                  <label className="block text-sm font-semibold text-emerald-200 mb-2">
+                    💵 {t('lobby.small_blind')}
+                  </label>
+                  <input
+                    type="number"
+                    value={smallBlind}
+                    onChange={(e) => setSmallBlind(e.target.value)}
+                    disabled={state.isLoading}
+                    style={{
+                      boxSizing: 'border-box',
+                      width: '100%',
+                      backgroundColor: '#064e3b',
+                      color: 'white'
+                    }}
+                    className="border-2 border-emerald-600 focus:border-emerald-400 focus:outline-none rounded-lg px-3 py-2 text-base font-semibold disabled:opacity-50"
+                    placeholder="10"
+                  />
+                </div>
+
+                <div className="mb-5" style={{ boxSizing: 'border-box' }}>
+                  <label className="block text-sm font-semibold text-emerald-200 mb-2">
+                    💰 {t('lobby.big_blind')}
+                  </label>
+                  <input
+                    type="number"
+                    value={bigBlind}
+                    onChange={(e) => setBigBlind(e.target.value)}
+                    disabled={state.isLoading}
+                    style={{
+                      boxSizing: 'border-box',
+                      width: '100%',
+                      backgroundColor: '#064e3b',
+                      color: 'white'
+                    }}
+                    className="border-2 border-emerald-600 focus:border-emerald-400 focus:outline-none rounded-lg px-3 py-2 text-base font-semibold disabled:opacity-50"
+                    placeholder="20"
+                  />
+                </div>
+
+                <div className="flex gap-3" style={{ boxSizing: 'border-box' }}>
+                  <button
+                    onClick={() => setShowCreateForm(false)}
+                    disabled={state.isLoading}
+                    className="flex-1 bg-emerald-700 hover:bg-emerald-600 text-white py-2.5 rounded-lg font-semibold disabled:opacity-50 transition-colors border border-emerald-600"
+                    style={{ boxSizing: 'border-box' }}
+                  >
+                    {t('common.cancel')}
+                  </button>
+                  <button
+                    onClick={handleCreateTable}
+                    disabled={state.isLoading}
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-lg font-semibold disabled:opacity-50 transition-colors shadow-lg"
+                    style={{ boxSizing: 'border-box' }}
+                  >
+                    {state.isLoading ? t('lobby.creating') : t('lobby.create')}
+                  </button>
+                </div>
               </div>
-              <div className="flex-1">
-                <label className="block text-emerald-300 mb-2">{t('lobby.big_blind')}</label>
-                <input
-                  type="number"
-                  value={bigBlind}
-                  onChange={(e) => setBigBlind(e.target.value)}
-                  className="w-full bg-emerald-950 border border-emerald-700 rounded px-4 py-2 text-white"
-                  placeholder="20"
-                />
+            </div>
+          </>,
+          document.body
+        )}
+
+        {/* 网络错误提示 */}
+        {fhevm.wrongNetwork && (
+          <div className="bg-yellow-900/30 border-2 border-yellow-600 rounded-lg p-5 mb-8">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-yellow-300 font-bold mb-2 text-lg">⚠️ {t('errors.wrong_network')}</p>
+                <p className="text-yellow-200 text-sm">
+                  {i18n.language === 'zh-CN'
+                    ? '当前网络不正确，本游戏需要连接到 Sepolia 测试网'
+                    : 'Wrong network detected. This game requires Sepolia testnet'}
+                </p>
               </div>
-              <div className="flex items-end">
-                <button
-                  onClick={handleCreateTable}
-                  disabled={state.isLoading}
-                  className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-600 text-white px-8 py-2 rounded font-semibold transition-colors"
-                >
-                  {state.isLoading ? t('lobby.creating') : t('lobby.create')}
-                </button>
-              </div>
+              <button
+                onClick={async () => {
+                  try {
+                    await fhevm.switchToSepolia();
+                  } catch (err) {
+                    console.error('切换网络失败:', err);
+                  }
+                }}
+                className="bg-yellow-600 hover:bg-yellow-500 text-white px-6 py-3 rounded-lg font-bold transition-colors whitespace-nowrap shadow-lg"
+              >
+                🔄 {t('errors.switch_to_sepolia')}
+              </button>
             </div>
           </div>
         )}
 
         {/* FHEVM 错误提示 */}
-        {fhevm.error && (
+        {fhevm.error && !fhevm.wrongNetwork && (
           <div className="bg-red-900/30 border border-red-700 rounded-lg p-4 mb-8">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-red-300 font-semibold mb-1">⚠️ FHEVM 连接错误</p>
+                <p className="text-red-300 font-semibold mb-1">⚠️ {t('errors.fhevm_connection_error')}</p>
                 <p className="text-red-200 text-sm">{fhevm.error.message}</p>
                 {fhevm.error.message.includes('backend connection') && (
                   <p className="text-yellow-300 text-sm mt-2">
-                    💡 提示：Relayer 服务暂时不可用，请稍后重试或刷新页面
+                    💡 {t('errors.relayer_unavailable')}
                   </p>
+                )}
+                {fhevm.error.message.includes('could not decode') && (
+                  <div className="mt-2">
+                    <p className="text-yellow-300 text-sm font-semibold">
+                      💡 {t('errors.contract_not_deployed')}
+                    </p>
+                    <p className="text-yellow-200 text-xs mt-1">
+                      {t('errors.contract_error_hint')}
+                    </p>
+                  </div>
                 )}
               </div>
               <button
@@ -166,7 +271,7 @@ export function Lobby({ onSelectTable }: LobbyProps) {
                 disabled={fhevm.isInitializing}
                 className="bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white px-4 py-2 rounded font-semibold transition-colors whitespace-nowrap"
               >
-                {fhevm.isInitializing ? '重试中...' : '🔄 重试连接'}
+                {fhevm.isInitializing ? t('errors.fhevm_retrying') : `🔄 ${t('errors.fhevm_retry')}`}
               </button>
             </div>
           </div>

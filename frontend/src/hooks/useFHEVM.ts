@@ -1,19 +1,33 @@
 import { useState, useEffect } from 'react';
-import { useAccount, useChainId } from 'wagmi';
+import { useAccount, useChainId, useSwitchChain } from 'wagmi';
+import { sepolia } from 'wagmi/chains';
 import { initFHEVM, encryptUint64, encryptUint8, resetFHEVM, decryptUint8, decryptUint8Batch } from '../lib/fhevm';
 import { POKER_TABLE_ADDRESS } from '../lib/contract';
+
+const SEPOLIA_CHAIN_ID = 11155111;
 
 export function useFHEVM() {
   const { address } = useAccount();
   const chainId = useChainId();
+  const { switchChain } = useSwitchChain();
   const [isInitialized, setIsInitialized] = useState(false);
   const [isInitializing, setIsInitializing] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [wrongNetwork, setWrongNetwork] = useState(false);
+
+  useEffect(() => {
+    if (address && chainId !== SEPOLIA_CHAIN_ID) {
+      setWrongNetwork(true);
+      setError(new Error('Switch network to Sepolia!'));
+    } else {
+      setWrongNetwork(false);
+    }
+  }, [address, chainId]);
 
   // 初始化FHEVM
   useEffect(() => {
-    if (!address || isInitialized || isInitializing) {
+    if (!address || isInitialized || isInitializing || wrongNetwork) {
       return;
     }
 
@@ -42,7 +56,24 @@ export function useFHEVM() {
     };
 
     initialize();
-  }, [address, chainId, retryCount]); // 添加 retryCount 以支持重试
+  }, [address, chainId, retryCount, wrongNetwork]); // 添加 wrongNetwork 依赖
+
+  // 切换到 Sepolia 网络
+  const switchToSepolia = async () => {
+    if (!switchChain) {
+      throw new Error('无法切换网络');
+    }
+    try {
+      await switchChain({ chainId: sepolia.id });
+      setWrongNetwork(false);
+      setError(null);
+      // 切换成功后自动重试初始化
+      setRetryCount(prev => prev + 1);
+    } catch (err) {
+      console.error('切换网络失败:', err);
+      throw err;
+    }
+  };
 
   // 手动重试初始化
   const retryInitialization = () => {
@@ -93,15 +124,31 @@ export function useFHEVM() {
     return decryptUint8Batch(handles, contractAddr, userAddr, signer);
   };
 
-  // 解密余额(暂不实现)
-  const decryptBalance = async (_handle: string) => {
-    throw new Error('Decryption not implemented yet');
+  // 解密余额
+  const decryptBalance = async (handle: string, contractAddr: string, userAddr: string, signer: any) => {
+    if (!isInitialized) {
+      throw new Error('FHEVM not initialized');
+    }
+    // 余额是 euint64，使用与解密下注金额相同的方法
+    const instance = await initFHEVM(chainId);
+    const { getAddress } = await import('ethers');
+    const checksumContractAddr = getAddress(contractAddr);
+    const checksumUserAddr = getAddress(userAddr);
+
+    return instance.reencrypt(
+      handle,
+      checksumContractAddr,
+      checksumUserAddr,
+      signer.address,
+      signer
+    );
   };
 
   return {
     isInitialized,
     isInitializing,
     error,
+    wrongNetwork,
     encryptBuyIn,
     encryptBetAmount,
     encryptCard,
@@ -109,5 +156,6 @@ export function useFHEVM() {
     decryptCards,
     decryptBalance,
     retryInitialization, // 导出重试函数
+    switchToSepolia, // 导出切换网络函数
   };
 }

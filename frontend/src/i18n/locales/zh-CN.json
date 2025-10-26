@@ -144,7 +144,15 @@
     "game_ended": "游戏已结束",
     "not_your_turn": "还没轮到你",
     "invalid_bet": "无效的下注金额",
-    "insufficient_balance": "余额不足"
+    "insufficient_balance": "余额不足",
+    "fhevm_connection_error": "FHEVM 连接错误",
+    "fhevm_retry": "重试连接",
+    "fhevm_retrying": "重试中...",
+    "relayer_unavailable": "提示：Relayer 服务暂时不可用，请稍后重试或刷新页面",
+    "contract_not_deployed": "合约未部署或网络错误",
+    "contract_error_hint": "请确保：1) 已连接到 Sepolia 测试网 2) 合约已正确部署 3) 网络连接正常",
+    "wrong_network": "网络错误",
+    "switch_to_sepolia": "切换到 Sepolia"
   }
 }
 
