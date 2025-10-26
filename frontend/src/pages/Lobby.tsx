@@ -91,11 +91,6 @@ export function Lobby({ onSelectTable }: LobbyProps) {
 
   return (
     <div className="min-h-screen overflow-x-hidden p-8">
-      {/* 语言切换器 - 固定在右上角 */}
-      <div style={{ position: 'fixed', top: '1.5rem', right: '2rem', zIndex: 9999 }}>
-        <LanguageSwitcher />
-      </div>
-
       <div className="max-w-[1600px] mx-auto">
         {/* 头部 */}
         <div className="mb-8 flex items-center justify-between">
@@ -103,12 +98,16 @@ export function Lobby({ onSelectTable }: LobbyProps) {
             <h1 className="text-3xl font-bold text-white mb-2">{t('lobby.title')}</h1>
             <p className="text-emerald-400">{tableCount} {t('lobby.tables_count')}</p>
           </div>
-          <button
-            onClick={() => setShowCreateForm(!showCreateForm)}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors"
-          >
-            {showCreateForm ? t('common.cancel') : t('lobby.create_table')}
-          </button>
+          {/* 右侧按钮组 */}
+          <div className="flex items-center gap-4">
+            <LanguageSwitcher />
+            <button
+              onClick={() => setShowCreateForm(!showCreateForm)}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors"
+            >
+              {showCreateForm ? t('common.cancel') : t('lobby.create_table')}
+            </button>
+          </div>
         </div>
 
         {/* 创建表单 */}
