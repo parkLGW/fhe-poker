@@ -132,7 +132,7 @@ export function Game({ tableId, onBack }: GameProps) {
           } else {
             setLoadAttempts(0); // 重置计数器
           }
-        } catch (err) {
+        } catch {
           // 继续加载，可能是网络问题
         }
 
@@ -185,7 +185,7 @@ export function Game({ tableId, onBack }: GameProps) {
           try {
             const winner = await contractService.getWinner(tableId);
             setWinnerInfo(winner);
-          } catch (err) {
+          } catch {
             // 忽略获胜者信息加载失败
           }
         }
@@ -209,7 +209,7 @@ export function Game({ tableId, onBack }: GameProps) {
           setLoading(false);
         }
       }
-  }, [tableId, loadAttempts, decryptedCards, setLoading, setError, setTableInfo, setPlayerCards, setCommunityCards]);
+  }, [tableId, loadAttempts, decryptedCards, myPlayerIndex, setLoading, setError, setTableInfo, setPlayerCards, setCommunityCards]);
 
   // 定时轮询游戏信息
   useEffect(() => {
@@ -279,7 +279,7 @@ export function Game({ tableId, onBack }: GameProps) {
     };
 
     decryptCards();
-  }, [fhevm.isInitialized, pendingDecryption, address, state.playerCards, isDecrypting, decryptedCards]);
+  }, [fhevm, fhevm.isInitialized, pendingDecryption, address, state.playerCards, isDecrypting, decryptedCards]);
 
   // 监听游戏状态变化，当游戏开始时重置解密状态
   useEffect(() => {

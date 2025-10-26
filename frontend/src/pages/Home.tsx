@@ -48,9 +48,9 @@ export function Home() {
           params: [{ chainId: '0x' + SEPOLIA_CHAIN_ID.toString(16) }],
         });
       }
-    } catch (error: any) {
+    } catch (error) {
       // 如果网络不存在，尝试添加网络
-      if (error.code === 4902) {
+      if ((error as { code?: number }).code === 4902) {
         try {
           await window.ethereum.request({
             method: 'wallet_addEthereumChain',
