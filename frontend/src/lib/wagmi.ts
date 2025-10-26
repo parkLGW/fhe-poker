@@ -2,9 +2,39 @@ import { http, createConfig } from 'wagmi';
 import { sepolia, localhost } from 'wagmi/chains';
 import { injected } from 'wagmi/connectors';
 
+// 扩展 Window 接口以支持 OKX 钱包
+declare global {
+  interface Window {
+    okxwallet?: typeof window.ethereum;
+  }
+}
+
 export const config = createConfig({
   chains: [localhost, sepolia],
-  connectors: [injected()],
+  connectors: [
+    injected({
+      target() {
+        return {
+          id: 'metamask',
+          name: 'MetaMask',
+          provider: typeof window !== 'undefined' && window.ethereum?.isMetaMask
+            ? window.ethereum
+            : undefined,
+        };
+      },
+    }),
+    injected({
+      target() {
+        return {
+          id: 'okx',
+          name: 'OKX Wallet',
+          provider: typeof window !== 'undefined' && window.okxwallet
+            ? window.okxwallet
+            : undefined,
+        };
+      },
+    }),
+  ],
   transports: {
     [localhost.id]: http(),
     [sepolia.id]: http(),
