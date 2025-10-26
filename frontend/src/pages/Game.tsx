@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useAccount } from 'wagmi';
-import { POKER_TABLE_ADDRESS, POKER_TABLE_ABI, GameState } from '../lib/contract';
+import { GameState } from '../lib/contract';
 import { PlayerSeat } from '../components/game/PlayerSeat';
 import { CommunityCards } from '../components/game/CommunityCards';
 import { BettingPanel } from '../components/game/BettingPanel';
 import { useFHEVM } from '../hooks/useFHEVM';
-import { callBet, callLeaveTable, callStartGame, readTableInfo, readCommunityCards, readPlayerCards, readPlayerIndex, callFold, callCheck, callCall } from '../lib/ethers-contract';
+import { callBet, callLeaveTable, readTableInfo, readCommunityCards, readPlayerCards, readPlayerIndex, callFold, callCheck, callCall } from '../lib/ethers-contract';
 
 interface GameProps {
   tableId: number;
@@ -30,14 +30,10 @@ export function Game({ tableId, onBack }: GameProps) {
   // 先解析游戏桌信息 (按照合约getTableInfo的返回顺序)
   const gameState = tableInfo ? Number(tableInfo[0]) : GameState.Waiting;
   const playerCount = tableInfo ? Number(tableInfo[1]) : 0;
-  const activePlayers = tableInfo ? Number(tableInfo[2]) : 0;
   const currentPlayerIndex = tableInfo ? Number(tableInfo[3]) : 0;
   const dealerIndex = tableInfo ? Number(tableInfo[4]) : 0;
   const smallBlindIndex = tableInfo ? Number(tableInfo[5]) : 0;
   const bigBlindIndex = tableInfo ? Number(tableInfo[6]) : 0;
-  const communityCardCount = tableInfo ? Number(tableInfo[7]) : 0;
-  const smallBlind = tableInfo ? Number(tableInfo[8]) : 0;
-  const bigBlind = tableInfo ? Number(tableInfo[9]) : 0;
 
   // 定期读取游戏桌信息
   useEffect(() => {
@@ -293,17 +289,17 @@ export function Game({ tableId, onBack }: GameProps) {
       // 使用FHEVM加密下注金额
       const encrypted = await fhevm.encryptBetAmount(amount);
       console.log('✅ 加密完成:', {
-        dataType: typeof encrypted.data,
-        dataIsUint8Array: encrypted.data instanceof Uint8Array,
-        dataLength: encrypted.data?.length,
-        proofType: typeof encrypted.proof,
-        proofIsUint8Array: encrypted.proof instanceof Uint8Array,
-        proofLength: encrypted.proof?.length,
+        dataType: typeof encrypted.encryptedAmount,
+        dataIsUint8Array: encrypted.encryptedAmount instanceof Uint8Array,
+        dataLength: encrypted.encryptedAmount?.length,
+        proofType: typeof encrypted.inputProof,
+        proofIsUint8Array: encrypted.inputProof instanceof Uint8Array,
+        proofLength: encrypted.inputProof?.length,
       });
 
       // 使用 ethers.js 调用合约（按照 dev.md 的方式）
       // ethers.js 会自动处理 Uint8Array 的序列化
-      await callBet(tableId, encrypted.data, encrypted.proof);
+      await callBet(tableId, encrypted.encryptedAmount, encrypted.inputProof);
 
       console.log('✅ 加注成功！');
       alert('✅ 加注成功！');

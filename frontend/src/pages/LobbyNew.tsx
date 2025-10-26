@@ -18,7 +18,6 @@ interface LobbyProps {
 
 export function LobbyNew({ onSelectTable }: LobbyProps) {
   const { t } = useTranslation();
-  const { address } = useAccount();
   const fhevm = useFHEVM();
   const { state, setLoading, setError } = useGameStore();
 

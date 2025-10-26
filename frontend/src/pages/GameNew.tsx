@@ -21,18 +21,6 @@ interface GameProps {
 const SUITS = ['♠', '♥', '♦', '♣'];
 const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
 
-function cardIndexToString(index: any): string {
-  // 处理 BigInt 类型
-  const numIndex = typeof index === 'bigint' ? Number(index) : Number(index || 0);
-  // 卡牌索引现在是 1-52，0 表示未发的牌
-  if (numIndex < 1 || numIndex > 52) return '?';
-  // 转换为 0-51 的索引
-  const cardIndex = numIndex - 1;
-  const suit = SUITS[Math.floor(cardIndex / 13)];
-  const rank = RANKS[cardIndex % 13];
-  return `${rank}${suit}`;
-}
-
 // 判断花色颜色
 function getSuitColor(suit: string): string {
   return suit === '♥' || suit === '♦' ? 'text-red-600' : 'text-gray-900';
@@ -62,7 +50,6 @@ function PokerCard({ card, isHidden = false, size = 'normal' }: { card?: number 
     );
   }
 
-  const cardStr = cardIndexToString(card);
   const numIndex = typeof card === 'bigint' ? Number(card) : Number(card || 0);
   // 卡牌索引现在是 1-52，转换为 0-51
   const cardIndex = numIndex - 1;
@@ -321,7 +308,7 @@ export function GameNew({ tableId, onBack }: GameProps) {
 
       // 重新加载游戏信息，而不是刷新整个页面
       setTimeout(() => {
-        loadGameData();
+        loadGameInfo();
       }, 1000);
     } catch (err) {
       setError((err as Error).message);

@@ -163,13 +163,14 @@ export async function callJoinTable(
  */
 export async function callLeaveTable(tableId: number) {
   const contract = await getPokerTableContract();
-  const signer = await contract.runner?.getAddress?.();
+  const runner = contract.runner;
+  const signerAddress = runner && 'getAddress' in runner ? await (runner as any).getAddress() : null;
 
-  console.log('📞 使用 ethers.js 调用 leaveTable 函数:', { tableId, signer });
+  console.log('📞 使用 ethers.js 调用 leaveTable 函数:', { tableId, signer: signerAddress });
 
   // 先检查玩家实际所在的桌号
   try {
-    const playerTableId = await contract.playerTable(signer);
+    const playerTableId = await contract.playerTable(signerAddress);
     const playerTableIdNum = typeof playerTableId === 'bigint' ? Number(playerTableId) : playerTableId;
 
     console.log('🔍 玩家所在桌号 (原始):', playerTableId);

@@ -3,7 +3,7 @@
  * 使用简单的 Context + Hook 模式
  */
 
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
 
 export interface GameState {
   // 当前游戏桌

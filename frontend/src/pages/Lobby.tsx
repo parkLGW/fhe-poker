@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useChainId, useAccount } from 'wagmi';
-import { POKER_TABLE_ADDRESS, POKER_TABLE_ABI, GameState } from '../lib/contract';
+import { GameState } from '../lib/contract';
 import { getGameStateName } from '../lib/poker';
 import { Game } from './Game';
 import { useFHEVM } from '../hooks/useFHEVM';
@@ -308,7 +308,7 @@ function TableCard({ tableId, onJoin, fhevm }: { tableId: number; onJoin: (table
       // ethers.js 会自动处理 Uint8Array 的序列化
       setTransactionStatus('pending');
       console.log('🎯 即将加入桌号:', tableId);
-      await callJoinTable(tableId, encrypted.data, encrypted.proof);
+      await callJoinTable(tableId, encrypted.encryptedAmount, encrypted.inputProof);
 
       console.log('✅ 加入游戏成功！');
       setTransactionStatus('success');

@@ -201,7 +201,7 @@ export class ContractService {
 
     try {
       const tx = await this.contract.fold(tableId);
-      const receipt = await tx.wait();
+      await tx.wait();
     } catch (error: any) {
       console.error('❌ 弃牌失败:', error);
       throw error;
@@ -216,7 +216,7 @@ export class ContractService {
 
     try {
       const tx = await this.contract.check(tableId);
-      const receipt = await tx.wait();
+      await tx.wait();
     } catch (error: any) {
       console.error('❌ 过牌失败:', error);
       throw error;
@@ -239,7 +239,7 @@ export class ContractService {
       }
 
       const tx = await this.contract.call(tableId);
-      const receipt = await tx.wait();
+      await tx.wait();
     } catch (error: any) {
       const parsedError = parseContractError(error);
       console.error('❌ 跟注失败:', parsedError);
@@ -359,7 +359,7 @@ export class ContractService {
 
     try {
       const tx = await this.contract.revealCards(tableId, card1, card2);
-      const receipt = await tx.wait();
+      await tx.wait();
     } catch (error: any) {
       console.error('❌ 公开手牌失败:', error);
       throw error;
